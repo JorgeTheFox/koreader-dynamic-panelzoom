@@ -1019,6 +1019,10 @@ end
 function PanelZoomIntegration:refreshCurrentPanelIfActive()
     if self._current_imgviewer and self.integration_mode and #self.current_panels > 0 then
         logger.info("DynamicPanelZoom: Refreshing panel viewer with new reading direction")
+        -- Propagate reading direction immediately
+        if self._current_imgviewer.updateReadingDirection then
+            self._current_imgviewer:updateReadingDirection(self:getEffectiveReadingDirection())
+        end
         self:displayCurrentPanel()
     end
 end

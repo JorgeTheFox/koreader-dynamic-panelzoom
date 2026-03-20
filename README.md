@@ -58,7 +58,8 @@ The tap zones will automatically adjust. In RTL mode, the left side of the scree
 ## Known Issues & Limitations
 
 -   **Fullscreen Requirement:** The plugin currently only works correctly if you are viewing the comic in full-screen mode (without UI bars showing). If KOReader's UI menus or status bars are visible when activating Panel Zoom, the coordinate calculations may fail or behave erratically.
--   **RTL Option Not Working:** The Right-to-Left (RTL) reading direction option is currently present in the menu but its logic is not fully implemented or functioning correctly in this release.
+
+-   **E-ink Flickering on Preload Transition:** When advancing through preloaded panels, there may be unnecessary UI flickering due to sequential update calls instead of batched redrawing (see [#2](https://github.com/JorgeTheFox/koreader-dynamic-panelzoom/issues/2)).
 
 ## Technical Approach & Acknowledgements
 
