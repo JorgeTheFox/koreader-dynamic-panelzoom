@@ -29,7 +29,7 @@ It's designed to "just work" and is especially useful for reading digital comics
 
 ## Installation
 
-1.  [Download the latest release](https://github.com/jefe/koreader-dynamic-panelzoom/releases) (the `dynamic_panelzoom.koplugin.zip` file).
+1.  [Download the latest release](https://github.com/JorgeTheFox/koreader-dynamic-panelzoom/releases) (the `dynamic_panelzoom.koplugin.zip` file).
 2.  Unzip the file. You should now have a folder named `dynamic_panelzoom.koplugin`.
 3.  Copy this `dynamic_panelzoom.koplugin` folder into your KOReader's `plugins` directory. The path is typically `koreader/plugins/`.
 4.  Restart KOReader. The plugin will be loaded automatically.
