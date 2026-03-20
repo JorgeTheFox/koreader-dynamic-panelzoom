@@ -1,16 +1,15 @@
 --[[
-PanelViewer - Visor de Imagen Personalizado para Paneles
+PanelViewer - Custom Image Viewer for Comic Panels
 
-Este widget es un visor de imágenes construido desde cero para la navegación
-específica por paneles de cómic. Se encarga de renderizar el panel,
-manejar los gestos de toque (tap) y asegurar que la experiencia sea fluida
-en dispositivos de tinta electrónica (E-Ink).
+This widget is an image viewer built from scratch specifically for
+comic panel navigation. It handles rendering the panel, managing
+tap gestures, and ensuring a smooth experience on E-Ink devices.
 
-Inspirado por las APIs de renderizado modernas, proporciona un control
-más fino sobre el posicionamiento, el escalado y las transiciones.
+Inspired by modern rendering APIs, it provides finer control over
+positioning, scaling, and transitions compared to standard viewers.
 ]]
 
--- Dependencias de KOReader
+-- KOReader Dependencies
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local Geom = require("ui/geometry")
@@ -19,56 +18,57 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local Screen = require("device").screen
 local UIManager = require("ui/uimanager")
 
--- Utilidades
+-- Utilities
 local logger = require("logger")
 local _ = require("gettext")
 
 -- ===================================================================
--- CLASE: PanelViewer
--- Un contenedor de entrada que muestra una imagen a pantalla completa
--- y responde a los toques para la navegación.
+-- CLASS: PanelViewer
+-- An input container that displays an image fullscreen and
+-- responds to tap gestures for navigation.
 -- ===================================================================
 local PanelViewer = InputContainer:extend{
-    -- --- PROPIEDADES ---
+    -- --- PROPERTIES ---
     name = "PanelViewer",
-    image = nil,                 -- La imagen del panel (un BlitBuffer) a mostrar
-    fullscreen = true,           -- Siempre se muestra a pantalla completa
-    reading_direction = "ltr", -- Sentido de lectura actual
-    custom_position = nil,       -- Posición personalizada para el centrado inteligente
+    image = nil,                 -- The panel image (a BlitBuffer) to display
+    fullscreen = true,           -- Always force fullscreen display
+    reading_direction = "ltr", -- Current reading direction (ltr/rtl)
+    custom_position = nil,       -- Custom coordinates for smart centering
 
-    -- --- CALLBACKS (Funciones de llamada) ---
-    -- Estas funciones son asignadas desde main.lua para conectar la UI con la lógica
+    -- --- CALLBACKS ---
+    -- These are assigned by main.lua to connect the UI back to the core logic
     onNext = nil,
     onPrev = nil,
     onClose = nil,
     
-    -- --- ESTADO INTERNO ---
-    _image_bb = nil,             -- Buffer de la imagen original
-    _display_rect = nil,         -- Rectángulo donde se dibujará la imagen en pantalla
+    -- --- INTERNAL STATE ---
+    _image_bb = nil,             -- Buffer of the original image
+    _display_rect = nil,         -- The rectangle defining where the image is drawn on screen
 }
 
 --
--- FUNCIÓN: init()
--- Se ejecuta al crear una nueva instancia de PanelViewer.
+-- FUNCTION: init()
+-- Executed when a new PanelViewer instance is created.
 --
 function PanelViewer:init()
-    -- 1. Configura las zonas de la pantalla que responderán a los toques
+    -- 1. Configure the screen zones that will respond to tap gestures
     self:setupTouchZones()
-    -- 2. Carga y procesa la imagen del panel
+    -- 2. Load and process the provided panel image
     self:loadImage()
-    -- 3. Calcula dónde y de qué tamaño se va a dibujar la imagen
+    -- 3. Calculate the dimensions and position for drawing the image
     self:calculateDisplayRect()
 end
 
 --
--- FUNCIÓN: setupTouchZones()
--- Define las áreas en la pantalla para avanzar, retroceder o cerrar.
+-- FUNCTION: setupTouchZones()
+-- Defines the screen areas for next, previous, and close actions.
 --
 function PanelViewer:setupTouchZones()
     local screen_w, screen_h = Screen:getWidth(), Screen:getHeight()
     
-    -- Creamos un único gestor de eventos para "Tap" que cubre toda la pantalla.
-    -- La lógica para decidir qué hacer (avanzar/retroceder/cerrar) se encuentra en onTap().
+    -- We create a single "Tap" gesture handler that covers the entire screen.
+    -- The logic to decide the action (next/prev/close) based on the tap coordinates
+    -- is handled within the onTap() function.
     self.ges_events = {
         Tap = {
             GestureRange:new{
@@ -80,12 +80,12 @@ function PanelViewer:setupTouchZones()
 end
 
 --
--- FUNCIÓN: loadImage()
--- Carga la imagen desde el BlitBuffer proporcionado por main.lua.
+-- FUNCTION: loadImage()
+-- Loads the image from the BlitBuffer provided by main.lua.
 --
 function PanelViewer:loadImage()
     if not self.image then
-        logger.warn("PanelViewer: No se ha proporcionado una imagen.")
+        logger.warn("PanelViewer: No image was provided.")
         return false
     end
     self._image_bb = self.image
@@ -93,15 +93,15 @@ function PanelViewer:loadImage()
 end
 
 --
--- FUNCIÓN: calculateDisplayRect()
--- Calcula el rectángulo de destino para la imagen del panel en la pantalla.
--- Utiliza la `custom_position` para el centrado inteligente.
+-- FUNCTION: calculateDisplayRect()
+-- Calculates the destination rectangle for the panel image on the screen.
+-- Utilizes the `custom_position` if provided for smart "center-lock" positioning.
 --
 function PanelViewer:calculateDisplayRect()
     if not self._image_bb then return end
 
-    -- Si main.lua nos ha pasado una posición personalizada, la usamos.
-    -- Esto es clave para el "center-lock", que mantiene la estabilidad visual.
+    -- If main.lua provided a custom position, use it.
+    -- This is crucial for the "center-lock" feature, maintaining visual stability across panels.
     if self.custom_position then
         self._display_rect = {
             x = self.custom_position.x,
@@ -110,7 +110,7 @@ function PanelViewer:calculateDisplayRect()
             h = self._image_bb:getHeight()
         }
     else
-        -- Si no, simplemente centramos la imagen en la pantalla (fallback).
+        -- Fallback: simply center the image dead-center on the screen.
         local screen_w, screen_h = Screen:getWidth(), Screen:getHeight()
         local img_w, img_h = self._image_bb:getWidth(), self._image_bb:getHeight()
         self._display_rect = {
@@ -123,20 +123,20 @@ function PanelViewer:calculateDisplayRect()
 end
 
 --
--- FUNCIÓN: onTap(_, ges)
--- Manejador de eventos de toque. Decide si avanzar, retroceder o cerrar.
+-- FUNCTION: onTap(_, ges)
+-- Gesture handler for taps. Determines whether to navigate forward, backward, or close.
 --
 function PanelViewer:onTap(_, ges)
     if not ges or not ges.pos then return false end
     
-    -- Calculamos en qué porcentaje de la pantalla (horizontalmente) se ha tocado.
+    -- Calculate the horizontal percentage of the screen that was tapped (0.0 to 1.0)
     local x_pct = ges.pos.x / Screen:getWidth()
     
-    -- La lógica de las zonas de toque depende del sentido de lectura.
+    -- Tap zone logic depends entirely on the reading direction
     local is_rtl = self.reading_direction == "rtl"
-    local next_zone, prev_zone = 0.7, 0.3 -- Zonas para LTR (cómics occidentales)
+    local next_zone, prev_zone = 0.7, 0.3 -- Standard zones for LTR (Western comics)
     if is_rtl then
-        next_zone, prev_zone = 0.3, 0.7 -- Zonas invertidas para RTL (manga)
+        next_zone, prev_zone = 0.3, 0.7 -- Inverted zones for RTL (Manga)
     end
     
     if x_pct > next_zone then
@@ -144,7 +144,7 @@ function PanelViewer:onTap(_, ges)
     elseif x_pct < prev_zone then
         if self.onPrev then self.onPrev() end
     else
-        -- Si se toca en el centro, se cierra el visor.
+        -- Tapping the center area (between the prev and next zones) closes the viewer
         if self.onClose then self.onClose() end
     end
     
@@ -152,20 +152,20 @@ function PanelViewer:onTap(_, ges)
 end
 
 --
--- FUNCIÓN: paintTo(bb, x, y)
--- La función de dibujado principal del widget. Se llama cada vez que KOReader
--- necesita refrescar la pantalla.
+-- FUNCTION: paintTo(bb, x, y)
+-- The core drawing function. Called by KOReader's UI manager whenever
+-- the screen needs to be refreshed.
 --
 function PanelViewer:paintTo(bb, x, y)
     if not self._image_bb or not self._display_rect then return end
     
-    -- Primero, pintamos todo el fondo de blanco para limpiar la pantalla anterior.
+    -- First, paint the entire background white to clear any artifacts from the previous screen
     local screen_w, screen_h = Screen:getWidth(), Screen:getHeight()
     bb:paintRect(0, 0, screen_w, screen_h, Blitbuffer.Color8(255))
 
-    -- Dibujamos la imagen del panel en la posición calculada.
-    -- Es importante usar "ditherblitFrom" en pantallas E-Ink para mejorar la
-    -- calidad de la imagen y reducir el "banding".
+    -- Draw the panel image at the calculated coordinates.
+    -- Using "ditherblitFrom" is highly recommended on E-Ink displays for grayscale
+    -- content (like manga) to improve image quality and significantly reduce banding.
     if Screen.sw_dithering then
         bb:ditherblitFrom(self._image_bb, self._display_rect.x, self._display_rect.y, 0, 0, self._display_rect.w, self._display_rect.h)
     else
@@ -175,12 +175,13 @@ end
 
 
 -- ===================================================================
--- FUNCIONES DE ACTUALIZACIÓN
+-- UPDATE FUNCTIONS
 -- ===================================================================
 
 --
--- FUNCIÓN: updateImage(new_image)
--- Permite a main.lua cambiar la imagen del panel (por ejemplo, al mostrar un panel precargado).
+-- FUNCTION: updateImage(new_image)
+-- Allows main.lua to swap the displayed image (e.g., when transitioning to a preloaded panel)
+-- without creating a new PanelViewer instance.
 --
 function PanelViewer:updateImage(new_image)
     self.image = new_image
@@ -189,8 +190,8 @@ function PanelViewer:updateImage(new_image)
 end
 
 --
--- FUNCIÓN: updateCustomPosition(custom_position)
--- Permite a main.lua actualizar la posición de centrado.
+-- FUNCTION: updateCustomPosition(custom_position)
+-- Allows main.lua to update the centering position for the current image.
 --
 function PanelViewer:updateCustomPosition(custom_position)
     self.custom_position = custom_position
@@ -198,15 +199,15 @@ function PanelViewer:updateCustomPosition(custom_position)
 end
 
 --
--- FUNCIÓN: update()
--- Provoca un repintado de la pantalla.
+-- FUNCTION: update()
+-- Triggers a UI repaint for this widget.
 --
 function PanelViewer:update()
     UIManager:setDirty(self, "ui")
 end
 
 -- ===================================================================
--- FUNCIONES DE GESTIÓN DEL WIDGET
+-- WIDGET LIFECYCLE MANAGEMENT
 -- ===================================================================
 
 function PanelViewer:getScreenRect()
