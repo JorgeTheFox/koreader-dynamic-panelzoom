@@ -1,0 +1,25 @@
+# Lua
+*.lua~
+*.luac
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# Editor-specific
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# KOReader specific metadata
+metadata.lua
+metadata.epub.lua
+metadata.*.lua
+
+# Build artifacts
+*.zip
