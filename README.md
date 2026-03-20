@@ -48,9 +48,12 @@ If you are reading manga, you will want to set the reading order to Right-to-Lef
 
 The tap zones will automatically adjust. In RTL mode, the left side of the screen advances to the next panel.
 
-## Acknowledgements
+## Technical Approach & Acknowledgements
 
-This plugin was heavily inspired by and based on the initial work of [Kaito0](https://github.com/Kaito0) and their [panelreader.koplugin](https://github.com/Kaito0/panelreader.koplugin). This version refactors the core logic into a self-contained, real-time analysis engine that does not require external JSON files.
+This plugin was inspired by the idea behind [panelreader.koplugin](https://github.com/Kaito0/panelreader.koplugin) by Kaito0. However, the technical approach is completely different.
+
+-   **Kaito0's plugin** relies on external preprocessing (likely machine learning-based) to generate a JSON file with panel coordinates for every single comic. This can be very accurate for complex layouts, but requires significant setup and external processing power.
+-   **Dynamic Panel Zoom** is fully self-contained. It leverages the built-in image processing capabilities of KOReader (specifically the Leptonica library, similarly to how KOReader's native "Panel zoom" feature detects bounding boxes). This means no external JSON files, no preprocessing on a PC, and zero setup for the user. While it might occasionally struggle with extremely chaotic layouts, it offers a much more convenient, "plug-and-play" experience for the vast majority of comics and manga.
 
 ## License
 
