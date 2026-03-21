@@ -20,9 +20,11 @@ jobs:
         id: package
         run: |
           ZIP_NAME="dynamic_panelzoom.koplugin.zip"
-          # Usa git archive para empaquetar directamente lo comiteado,
-          # metiéndolo todo dentro de una carpeta llamada 'dynamic_panelzoom.koplugin/'
-          git archive --format=zip --prefix=dynamic_panelzoom.koplugin/ -o $ZIP_NAME HEAD
+          # Empaquetamos SÓLO el contenido de la carpeta dynamic_panelzoom.koplugin/
+          # para que el ZIP no incluya archivos raíz como README.md, LICENSE, o scripts
+          cd dynamic_panelzoom.koplugin
+          zip -r ../$ZIP_NAME ./*
+          cd ..
           
           # Guardamos el nombre del zip para el siguiente paso
           echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
