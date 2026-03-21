@@ -30,7 +30,6 @@ local PanelZoomIntegration = WidgetContainer:extend{
     _original_genPanelZoomMenu = nil, -- Store original panel zoom menu function
     _json_available = false, -- Track if JSON is available for current document
     reading_direction_override = nil, -- User override for reading direction (rtl/ltr)
-    horizontal_offset = 0,
 }
 
 function PanelZoomIntegration:init()
@@ -355,7 +354,6 @@ function PanelZoomIntegration:displayPreloadedPanel()
         custom_position.x, custom_position.y, image_w, image_h, screen_w, screen_h))
     
     self._current_imgviewer:update()
-    UIManager:setDirty(self._current_imgviewer, "ui")
     
     -- Clear preloaded data after use
     self._preloaded_image = nil
@@ -408,9 +406,6 @@ function PanelZoomIntegration:drawPagePartWithSettings(pageno, rect, panel_cente
         x = math.floor(math.max(padding, math.min(pos_x, screen_w - display_w - padding)) + 0.5),
         y = math.floor(math.max(padding, math.min(pos_y, screen_h - display_h - padding)) + 0.5)
     }
-    -- 5b. APPLY HORIZONTAL OFFSET
-custom_position.x = custom_position.x + (self.horizontal_offset or -2)
--- Optional: clamp to screen bounds
 
     -- 6. ASPECT RATIO NUDGES (Original offsets)
     if panel and dim then
@@ -981,38 +976,6 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
         -- Override genPanelZoomMenu to include our reading direction options
         self.ui.highlight.genPanelZoomMenu = function()
             local menu_items = self._original_genPanelZoomMenu(self.ui.highlight)
-            
-            table.insert(menu_items, 2, {  -- insert after reading direction
-    text = _("Horizontal Offset"),
-    sub_item_table = {
-        {
-            text = _("Left 1 px"),
-            callback = function()
-                self.horizontal_offset = (self.horizontal_offset or 0) - 1
-                logger.info("DynamicPanelZoom: Horizontal offset set to " .. self.horizontal_offset)
-                self:refreshCurrentPanelIfActive()
-            end
-        },
-        {
-            text = _("Right 1 px"),
-            callback = function()
-                self.horizontal_offset = (self.horizontal_offset or 0) + 1
-                logger.info("DynamicPanelZoom: Horizontal offset set to " .. self.horizontal_offset)
-                self:refreshCurrentPanelIfActive()
-            end
-        },
-        {
-            text = _("Reset"),
-            callback = function()
-                self.horizontal_offset = 0
-                logger.info("DynamicPanelZoom: Horizontal offset reset to 0")
-                self:refreshCurrentPanelIfActive()
-            end
-        }
-    },
-    separator = true,
-})
-
             
             -- Add reading direction submenu at the beginning
             table.insert(menu_items, 1, {
