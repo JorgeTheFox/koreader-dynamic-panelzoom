@@ -30,6 +30,8 @@ local PanelZoomIntegration = WidgetContainer:extend{
     _original_genPanelZoomMenu = nil, -- Store original panel zoom menu function
     _json_available = false, -- Track if JSON is available for current document
     reading_direction_override = nil, -- User override for reading direction (rtl/ltr)
+    zoom_margin_percent = 0.05, -- Default 5% extra margin for the free zoom mode
+    zoom_initial_scale = 1.2, -- Default 1.2x initial software scale for the free zoom mode
 }
 
 function PanelZoomIntegration:init()
@@ -303,7 +305,7 @@ function PanelZoomIntegration:preloadNextPanel()
                 -- Use helper function for center-preserving quantization
                 local rect = self:panelToRect(next_panel, dim)
                 
-                -- Render the next panel with document settings
+                -- Render the next panel with document settings (standard margins for preloading)
                 local image, rotate, custom_position = self:drawPagePartWithSettings(page, rect, center, next_panel, dim)
                 -- Store preloaded image with panel data for proper centering
                 if image then
@@ -371,7 +373,7 @@ function PanelZoomIntegration:displayPreloadedPanel()
 end
 
 -- Custom drawPagePart that applies document settings
-function PanelZoomIntegration:drawPagePartWithSettings(pageno, rect, panel_center, panel, dim)
+function PanelZoomIntegration:drawPagePartWithSettings(pageno, rect, panel_center, panel, dim, scale_override)
     -- 1. Document & Screen Settings
     local doc_cfg = self.ui.document.info.config or {}
     local gamma = self.ui.view.state.gamma or doc_cfg.gamma or 1.0
@@ -387,9 +389,15 @@ function PanelZoomIntegration:drawPagePartWithSettings(pageno, rect, panel_cente
     local safe_h = screen_h - (padding * 2)
 
     -- 3. CALCULATE SCALE (Must fit inside Safe Zone)
-    local scale_w = safe_w / rect.w
-    local scale_h = safe_h / rect.h
-    local final_scale = math.min(scale_w, scale_h)
+    local final_scale = 1.0
+    if scale_override then
+        final_scale = scale_override
+        logger.info(string.format("DynamicPanelZoom: Using override scale %.4f", final_scale))
+    else
+        local scale_w = safe_w / rect.w
+        local scale_h = safe_h / rect.h
+        final_scale = math.min(scale_w, scale_h)
+    end
 
     -- Calculate final display dimensions
     local display_w = math.floor(rect.w * final_scale + 0.5)
@@ -484,6 +492,16 @@ function PanelZoomIntegration:cleanupPreloadedImage()
 end
 
 function PanelZoomIntegration:changePage(diff)
+    -- Close the current panel viewer immediately so it doesn't linger 
+    -- and flash over the new page during the transition.
+    if self._current_imgviewer then
+        UIManager:close(self._current_imgviewer)
+        self._current_imgviewer = nil
+    end
+
+    -- Clear preloaded cache immediately to prevent ghost images
+    self:cleanupPreloadedImage()
+
     -- 1. Use KOReader's built-in page navigation method
     if self.ui.paging and self.ui.paging.onGotoViewRel then
         self.ui.paging:onGotoViewRel(diff)
@@ -496,30 +514,24 @@ function PanelZoomIntegration:changePage(diff)
     end
         
     -- 2. Wait for the engine to render the new page, then update viewer content
-    UIManager:scheduleIn(0.3, function()
+    UIManager:scheduleIn(0.4, function()
         local new_page = self:getSafePageNumber()
         logger.info(string.format("DynamicPanelZoom: Changed to page %d (diff: %d)", new_page, diff))
         self.last_page_seen = new_page
-        
-        -- Clear preloaded cache after page is fully loaded to prevent conflicts
-        self:cleanupPreloadedImage()
         
         self:importToggleZoomPanels()
         
         if #self.current_panels > 0 then
             -- Note: In our spatial mapping, index 1 is always top-left(LTR) or top-right(RTL).
             -- Index #current_panels is always bottom-right(LTR) or bottom-left(RTL).
-            -- In LTR: Next page (diff > 0) starts at 1. Prev page starts at N.
-            -- In RTL: Next page (diff > 0) starts at 1. Prev page starts at N.
-            self.current_panel_index = diff > 0 and 1 or #self.current_panels
-            -- Just update the current viewer instead of closing/reopening
+            -- Moving Forward (diff > 0): Start at index 1 (First panel of new page).
+            -- Moving Backward (diff < 0): Start at index N (Last panel of previous page).
+            self.current_panel_index = (diff > 0) and 1 or #self.current_panels
+            
+            -- Launch the viewer for the new page
             self:displayCurrentPanel()
         else
-            -- No panels on this page, close viewer
-            if self._current_imgviewer then
-                UIManager:close(self._current_imgviewer)
-                self._current_imgviewer = nil
-            end
+            -- No panels on this page, viewer is already closed. Just show info.
             UIManager:show(InfoMessage:new{ text = _("No panels on this page"), timeout = 1 })
         end
     end)
@@ -804,7 +816,7 @@ function PanelZoomIntegration:calculatePanelCenter(panel, dim)
     }
 end
 
-function PanelZoomIntegration:panelToRect(panel, dim)
+function PanelZoomIntegration:panelToRect(panel, dim, apply_margin_percent)
     -- Step 1: Compute panel center (NO padding involved) - semantic center only
     local panel_cx = (panel.x + panel.w / 2) * dim.w
     local panel_cy = (panel.y + panel.h / 2) * dim.h
@@ -816,42 +828,34 @@ function PanelZoomIntegration:panelToRect(panel, dim)
     local pw = panel.w * dim.w
     local ph = panel.h * dim.h
     
-    -- Calculate padding based on aspect ratio
-    local padding_left = 0
-    local padding_right = 0
-    local padding_top = 0
-    local padding_bottom = 0
-    local padding_x = 0
-    local padding_y = 0
-    
-    local panel_aspect_ratio = pw / ph
-    
-    if panel_aspect_ratio > 1.5 then
-        -- Wide horizontal panels (action scenes, landscapes)
-        padding_left = dim.w * 0.007
-        padding_right = dim.w * 0.006
-        padding_y = dim.h * 0.004
-    elseif panel_aspect_ratio < 0.67 then
-        -- Tall vertical panels (character focus, falling scenes)
-        padding_x = dim.w * 0.004
-        padding_top = dim.h * 0.001
-        padding_bottom = dim.h * 0.002
+    local left_extension = 0
+    local right_extension = 0
+    local top_extension = 0
+    local bottom_extension = 0
+
+    if apply_margin_percent and apply_margin_percent > 0 then
+        -- Free Zoom mode: Apply constant absolute margin based on page size
+        local base_dimension = math.max(dim.w, dim.h)
+        local constant_margin = math.floor(base_dimension * apply_margin_percent + 0.5)
+        
+        left_extension = constant_margin
+        right_extension = constant_margin
+        top_extension = constant_margin
+        bottom_extension = constant_margin
+        logger.info(string.format("PanelZoom: Applying constant %.0fpx expanded margins for zoom mode", constant_margin))
     else
-        -- Square/standard panels (dialogue, exposition)
-        padding_x = dim.w * 0.005
-        padding_top = dim.h * 0.0015
-        padding_bottom = dim.h * 0.003
+        -- Standard Panel Mode: Use default tight constraints
+        local panel_aspect_ratio = pw / ph
+        
+        left_extension = 2   -- Less extension on left side
+        right_extension = 2 -- 4px + 5px more extension on right
+        top_extension = 0.5
+        bottom_extension = 2.5
     end
     
-    -- Build render rect with left extension (more area on left side, less on right)
-    local left_extension = 2   -- Less extension on left side
-    local right_extension = 2 -- 4px + 5px more extension on right
-    local top_extension = 0.5
-    local bottom_extension = 2.5
-    
     local render_rect = {
-        x = px - left_extension,      -- Less cropping on left
-        y = py - top_extension,       -- Extend on top
+        x = px - left_extension,
+        y = py - top_extension,
         w = pw + left_extension + right_extension,
         h = ph + top_extension + bottom_extension,
     }
@@ -876,6 +880,110 @@ function PanelZoomIntegration:panelToRect(panel, dim)
     }
 end
 
+
+function PanelZoomIntegration:switchToZoomMode()
+    logger.info("DynamicPanelZoom: Switching to Free Zoom Mode")
+    
+    local panel = self.current_panels[self.current_panel_index]
+    if not panel then return false end
+
+    local page = self:getSafePageNumber()
+    local dim = self.ui.document:getNativePageDimensions(page) or self.ui.document:getPageSize(page)
+    if not dim then return false end
+
+    -- 1. Get expanded rect (margin for reading text that spills out)
+    local margin = self.zoom_margin_percent or 0.05
+    local expanded_rect = self:panelToRect(panel, dim, margin)
+    local center = self:calculatePanelCenter(panel, dim)
+    
+    -- 2. DYNAMIC SCALING (To prevent Segmentation Fault)
+    -- We cannot render arbitrary large images on E-Ink memory limits.
+    -- We calculate the scale so the image buffer NEVER exceeds screen size + a small buffer
+    local screen_w = Screen:getWidth()
+    local screen_h = Screen:getHeight()
+    
+    -- Safe memory rendering constraints
+    -- E-ink displays can usually handle a buffer 2.5x to 3x their resolution
+    -- before hitting SegFaults, but 1.5x is too blurry for comics text.
+    -- We raise this to 2.5x to get crisp text while staying safely below the crash threshold.
+    local max_buffer_w = screen_w * 2.5
+    local max_buffer_h = screen_h * 2.5
+    
+    -- Find a safe base scale for the MuPDF render phase
+    local scale_w = max_buffer_w / expanded_rect.w
+    local scale_h = max_buffer_h / expanded_rect.h
+    local safe_scale = math.min(scale_w, scale_h, 3.5) -- Raised the hard render scale cap to 3.5x
+    
+    logger.info(string.format("DynamicPanelZoom: Using safe memory render scale %.4f", safe_scale))
+
+    -- 3. Generate safe expanded image
+    local expanded_image, _, _ = self:drawPagePartWithSettings(page, expanded_rect, center, panel, dim, safe_scale)
+    if not expanded_image then return false end
+
+    -- Create native ImageViewer using safe dynamic loading
+    local ok, ImageViewer = pcall(require, "ui/widget/imageviewer")
+    if not ok or type(ImageViewer) ~= "table" then
+        logger.warn("DynamicPanelZoom: Failed to load imageviewer widget")
+        return false
+    end
+    
+    -- 4. APPLY SOFTWARE ZOOM OVER THE SAFE RENDER
+    -- To prevent any visual "jump" when switching to 1.0x, we need to match the exact visual scale 
+    -- the user was just looking at in the PanelViewer.
+    -- First, calculate what the scale was in the normal PanelViewer:
+    local normal_rect = self:panelToRect(panel, dim) -- Rect without zoom margins
+    local padding = 5
+    local safe_w = screen_w - (padding * 2)
+    local safe_h = screen_h - (padding * 2)
+    local normal_scale = math.min(safe_w / normal_rect.w, safe_h / normal_rect.h)
+    
+    -- The absolute scale we want to achieve on the physical screen (1 pixel image = 1 pixel screen at 1.0x)
+    local target_absolute_scale = normal_scale / safe_scale
+    
+    -- IMPORTANT: ImageViewer doesn't treat scale_factor 1.0 as 1:1 pixels.
+    -- It treats 1.0 as "Fit to screen" for the given image within its UI context.
+    -- When buttons_visible = true, ImageViewer reserves space at the bottom (usually ~10-12% of screen height).
+    local image_w = expanded_image:getWidth()
+    local image_h = expanded_image:getHeight()
+    
+    -- Estimate ImageViewer's actual usable viewport (it reserves bottom space for buttons)
+    local Size = require("ui/size")
+    local button_bar_height = Size.bottom_menu_height or math.floor(screen_h * 0.1)
+    local usable_h = screen_h - button_bar_height
+    
+    local fit_to_screen_scale = math.min(screen_w / image_w, usable_h / image_h)
+    
+    -- The software scale factor to pass to ImageViewer to achieve our target absolute scale
+    local base_visual_scale = target_absolute_scale / fit_to_screen_scale
+    
+    -- Apply the user's zoom preference on top of that base scale
+    local bump_factor = self.zoom_initial_scale or 1.2
+    local initial_scale_factor = base_visual_scale * bump_factor
+    
+    logger.info(string.format("DynamicPanelZoom: ImageViewer usable height approx %d (screen %d)", usable_h, screen_h))
+    logger.info(string.format("DynamicPanelZoom: ImageViewer Fit-to-screen scale is %.4f", fit_to_screen_scale))
+    logger.info(string.format("DynamicPanelZoom: Required Absolute scale is %.4f -> ImageViewer factor: %.4f", target_absolute_scale, base_visual_scale))
+    logger.info(string.format("DynamicPanelZoom: Setting ImageViewer software scale factor to %.4f (bump: %.1fx)", initial_scale_factor, bump_factor))
+
+    local image_viewer = ImageViewer:new{
+        image = expanded_image,
+        image_disposable = false, -- Disabled forced deletion to prevent garbage collection races/color noise
+        fullscreen = true,
+        with_title_bar = false,
+        buttons_visible = true, -- Restored native UI buttons and minimap
+        scale_factor = initial_scale_factor,
+        
+        -- Calculate the exact semantic center ratio of the panel inside our cropped expanded image
+        -- This ensures the ImageViewer starts positioned right over the panel, compensating for asymmetrical margins near page edges.
+        _center_x_ratio = (center.abs_x - expanded_rect.x) / expanded_rect.w,
+        _center_y_ratio = (center.abs_y - expanded_rect.y) / expanded_rect.h,
+    }
+
+    -- We just push the image_viewer on top of the UI stack. 
+    -- The PanelViewer stays underneath. When image_viewer is closed, PanelViewer is instantly revealed without flashing the background page.
+    UIManager:show(image_viewer)
+    return true
+end
 
 function PanelZoomIntegration:displayCurrentPanel()
     logger.info("DynamicPanelZoom: displayCurrentPanel called")
@@ -944,6 +1052,9 @@ function PanelZoomIntegration:displayCurrentPanel()
             -- Restore OCR when panel viewer is closed
             self:restoreOCR()
         end,
+        onHold = function()
+            self:switchToZoomMode()
+        end,
     }
     
     self._current_imgviewer = panel_viewer
@@ -979,7 +1090,7 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
             
             -- Add reading direction submenu at the beginning
             table.insert(menu_items, 1, {
-                text = _("Reading Direction"),
+                text = _("Reading direction"),
                 sub_item_table = {
                     {
                         text = _("Left-to-Right (LTR)"),
@@ -1008,6 +1119,64 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
                             self.current_panels = {}
                             self:refreshCurrentPanelIfActive()
                         end,
+                    },
+                },
+                separator = true,
+            })
+            
+            -- Add Free Zoom options
+            table.insert(menu_items, 2, {
+                text = _("Hold-to-Zoom settings"),
+                sub_item_table = {
+                    {
+                        text = _("Padding around panel"),
+                        sub_item_table = {
+                            {
+                                text = _("2% (Tight)"),
+                                checked_func = function() return self.zoom_margin_percent == 0.02 end,
+                                callback = function() self.zoom_margin_percent = 0.02 end,
+                            },
+                            {
+                                text = _("5% (Normal)"),
+                                checked_func = function() return self.zoom_margin_percent == 0.05 end,
+                                callback = function() self.zoom_margin_percent = 0.05 end,
+                            },
+                            {
+                                text = _("10% (Wide)"),
+                                checked_func = function() return self.zoom_margin_percent == 0.10 end,
+                                callback = function() self.zoom_margin_percent = 0.10 end,
+                            },
+                            {
+                                text = _("20% (Context)"),
+                                checked_func = function() return self.zoom_margin_percent == 0.20 end,
+                                callback = function() self.zoom_margin_percent = 0.20 end,
+                            },
+                        }
+                    },
+                    {
+                        text = _("Initial zoom level"),
+                        sub_item_table = {
+                            {
+                                text = _("Fit to screen (1.0x)"),
+                                checked_func = function() return self.zoom_initial_scale == 1.0 end,
+                                callback = function() self.zoom_initial_scale = 1.0 end,
+                            },
+                            {
+                                text = _("Slight Zoom (1.2x)"),
+                                checked_func = function() return self.zoom_initial_scale == 1.2 end,
+                                callback = function() self.zoom_initial_scale = 1.2 end,
+                            },
+                            {
+                                text = _("Medium Zoom (1.5x)"),
+                                checked_func = function() return self.zoom_initial_scale == 1.5 end,
+                                callback = function() self.zoom_initial_scale = 1.5 end,
+                            },
+                            {
+                                text = _("Heavy Zoom (2.0x)"),
+                                checked_func = function() return self.zoom_initial_scale == 2.0 end,
+                                callback = function() self.zoom_initial_scale = 2.0 end,
+                            },
+                        }
                     },
                 },
                 separator = true,

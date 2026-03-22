@@ -37,6 +37,7 @@ local PanelViewer = InputContainer:extend{
     onNext = nil,
     onPrev = nil,
     onClose = nil,
+    onHold = nil,
     
     -- Internal state
     _image_bb = nil,
@@ -70,6 +71,16 @@ function PanelViewer:setupTouchZones()
         Tap = {
             GestureRange:new{
                 ges = "tap",
+                range = Geom:new{
+                    x = 0, y = 0,
+                    w = screen_width,
+                    h = screen_height
+                }
+            }
+        },
+        Hold = {
+            GestureRange:new{
+                ges = "hold",
                 range = Geom:new{
                     x = 0, y = 0,
                     w = screen_width,
@@ -177,6 +188,12 @@ function PanelViewer:onTap(_, ges)
     -- Center tap: Close the viewer
     logger.info("PanelViewer: Center tap detected, closing viewer")
     if self.onClose then self.onClose() end
+    return true
+end
+
+function PanelViewer:onHold(_, ges)
+    logger.info("PanelViewer: Hold gesture detected, triggering zoom mode")
+    if self.onHold then self.onHold() end
     return true
 end
 
