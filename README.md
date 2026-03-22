@@ -12,7 +12,7 @@ No pre-processing, external scripts, or JSON files required—it analyzes the pa
 - **🔍 Hold-to-Zoom Mode:** Long-press on any panel to instantly enter a free-zoom state with smart text padding to read cut-off speech bubbles or admire wide landscape art.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/839285a6-00c0-4308-82cb-ba637a2e0284" width="400" alt="Demo GIF showing Dynamic Panel Zoom in action">
+  <img src="https://github.com/user-attachments/assets/839285a6-00c0-4308-82cb-ba637a2e0284" width="400" alt="Demo GIF showing Dynamic Panel Zoom in action" style="border: 2px solid #ccc; border-radius: 4px;">
 </p>
 
 ## Installation
