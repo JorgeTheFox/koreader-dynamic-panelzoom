@@ -3,15 +3,15 @@ name: Create Release
 on:
   push:
     tags:
-      - 'v*' # Se activa con tags como v1.0, v1.0.1, etc.
+      - 'v*' # Triggered by tags like v1.0, v1.0.1, etc.
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Silencia el warning de Node.js
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Silences Node.js warnings
     permissions:
-      contents: write # Necesita permisos para crear releases
+      contents: write # Needed to create releases and upload assets
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,17 +20,21 @@ jobs:
         id: package
         run: |
           ZIP_NAME="dynamic_panelzoom.koplugin.zip"
-          # Empaquetamos SÓLO el contenido de la carpeta dynamic_panelzoom.koplugin/
-          # para que el ZIP no incluya archivos raíz como README.md, LICENSE, o scripts
-          cd dynamic_panelzoom.koplugin
-          zip -r ../$ZIP_NAME ./*
-          cd ..
+          TAR_NAME="dynamic_panelzoom.koplugin.tar.gz"
           
-          # Guardamos el nombre del zip para el siguiente paso
+          # Package the folder itself (not just its contents) so the structure is preserved
+          # Some users prefer zip, others tar.gz. Let's provide both.
+          zip -r $ZIP_NAME dynamic_panelzoom.koplugin/
+          tar -czvf $TAR_NAME dynamic_panelzoom.koplugin/
+          
+          # Save filenames for the release step
           echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          echo "tar_name=${TAR_NAME}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: ${{ steps.package.outputs.zip_name }}
+          files: |
+            ${{ steps.package.outputs.zip_name }}
+            ${{ steps.package.outputs.tar_name }}

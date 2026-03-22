@@ -23,4 +23,5 @@ metadata.*.lua
 
 # Build artifacts
 *.zip
+*.tar.gz
 local_resources/
