@@ -507,42 +507,47 @@ function PanelZoomIntegration:changePage(diff)
     -- Save current state
     self._is_changing_page = true
 
-    -- 1. Use KOReader's built-in page navigation method
+    -- We calculate the new page and panels BEFORE actually changing the page
+    -- to allow synchronizing the panel update with the page change.
+    local current_page = self:getSafePageNumber()
+    local target_page = current_page + diff
+    
+    -- In KOReader, onGotoViewRel triggers a full screen refresh.
+    -- If we update the panel viewer BEFORE or AT THE SAME TIME as the page change,
+    -- the hardware will only do one flashui, rendering the new page behind
+    -- but keeping the updated PanelViewer on top.
+    
+    -- Force import and panels for the target page before doing the page jump
+    self.last_page_seen = target_page
+    
+    -- We call importToggleZoomPanels with the target page to get its panels
+    -- Note: we need to pass the target page since we haven't changed the page in UI yet.
+    self:importToggleZoomPanelsForPage(target_page)
+    
+    if #self.current_panels > 0 then
+        -- We have panels, prep the index.
+        self.current_panel_index = (diff > 0) and 1 or #self.current_panels
+        
+        -- We render the panel first!
+        self:displayCurrentPanelForPage(target_page)
+    else
+        -- No panels on this page, we'll just close viewer after jump.
+        self:closeViewer()
+        UIManager:show(InfoMessage:new{ text = _("No panels on this page"), timeout = 1 })
+    end
+    
+    -- Now trigger the page jump. Since PanelViewer is over the top and just got 
+    -- a flashui request, the hardware will coalesce the UI changes into one physical refresh!
     if self.ui.paging and self.ui.paging.onGotoViewRel then
         self.ui.paging:onGotoViewRel(diff)
         logger.info(string.format("DynamicPanelZoom: Used ui.paging.onGotoViewRel(%d)", diff))
     else
-        -- Fallback to key event
         local key = diff > 0 and "Right" or "Left"
         UIManager:sendEvent({ key = key, modifiers = {} })
         logger.info(string.format("DynamicPanelZoom: Used %s key event as fallback", key))
     end
-        
-    -- 2. Wait for the engine to render the new page, then update viewer content
-    UIManager:scheduleIn(0.4, function()
-        local new_page = self:getSafePageNumber()
-        logger.info(string.format("DynamicPanelZoom: Changed to page %d (diff: %d)", new_page, diff))
-        self.last_page_seen = new_page
-        
-        self:importToggleZoomPanels()
-        
-        if #self.current_panels > 0 then
-            -- Note: In our spatial mapping, index 1 is always top-left(LTR) or top-right(RTL).
-            -- Index #current_panels is always bottom-right(LTR) or bottom-left(RTL).
-            -- Moving Forward (diff > 0): Start at index 1 (First panel of new page).
-            -- Moving Backward (diff < 0): Start at index N (Last panel of previous page).
-            self.current_panel_index = (diff > 0) and 1 or #self.current_panels
-            
-            -- Only call displayCurrentPanel ONCE the page has changed and panels are imported
-            -- Doing this asynchronously prevents drawing the new panel on the old page's coordinate space
-            self:displayCurrentPanel()
-        else
-            -- No panels on this page, viewer is already closed. Just show info.
-            UIManager:show(InfoMessage:new{ text = _("No panels on this page"), timeout = 1 })
-            self:closeViewer()
-        end
-        self._is_changing_page = false
-    end)
+    
+    self._is_changing_page = false
 end
 
 function PanelZoomIntegration:getSafePageNumber()
@@ -626,10 +631,13 @@ function PanelZoomIntegration:onIntegratedPanelZoom(arg, ges)
 end
 
 function PanelZoomIntegration:importToggleZoomPanels()
+    self:importToggleZoomPanelsForPage(self:getSafePageNumber())
+end
+
+function PanelZoomIntegration:importToggleZoomPanelsForPage(page_idx)
     local doc_path = self.ui.document.file
     if not doc_path then return end
     
-    local page_idx = self:getSafePageNumber()
     local reading_dir = self:getEffectiveReadingDirection()
     
     -- The cache key must now include reading_dir, otherwise flipping direction
@@ -1033,15 +1041,17 @@ function PanelZoomIntegration:switchToZoomMode()
 end
 
 function PanelZoomIntegration:displayCurrentPanel()
-    logger.info("DynamicPanelZoom: displayCurrentPanel called")
+    return self:displayCurrentPanelForPage(self:getSafePageNumber())
+end
+
+function PanelZoomIntegration:displayCurrentPanelForPage(page)
+    logger.info(string.format("DynamicPanelZoom: displayCurrentPanelForPage called for page %d", page))
     local panel = self.current_panels[self.current_panel_index]
     if not panel then 
         logger.warn("DynamicPanelZoom: No panel data found for index " .. self.current_panel_index)
         return false 
     end
 
-    local page = self:getSafePageNumber()
-    
     -- Get dimensions from document for consistent coordinate space
     local dim = self.ui.document:getNativePageDimensions(page) or self.ui.document:getPageSize(page)
     if not dim then 
@@ -1085,6 +1095,12 @@ function PanelZoomIntegration:displayCurrentPanel()
         self._current_imgviewer:updatePanelAspectRatio(panel_aspect_ratio)
         self._current_imgviewer:updateImage(image)
         self._current_imgviewer:update()
+        
+        -- Flashui update is explicitly needed during transitions, especially page changes.
+        -- When we are reusing the viewer, and the page changed, we must force it here
+        UIManager:setDirty(self._current_imgviewer, function()
+            return "flashui", self._current_imgviewer.dimen, Screen.sw_dithering  -- Enable dithering for E-ink
+        end)
         
         -- Start preloading the next panel after a short delay
         UIManager:scheduleIn(0.2, function()
