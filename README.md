@@ -26,10 +26,13 @@ No pre-processing, external scripts, or JSON files required—it analyzes the pa
 3. Select **Reading direction**:
    - **Left-to-Right (LTR)** for Western comics
    - **Right-to-Left (RTL)** for Manga/Eastern comics
-4. **Hold-to-Zoom settings** (Optional):
-   - **Padding around panel:** Adds a safe margin (`2%` to `20%`) around the detected panel to capture overlapping speech bubbles.
+4. **Standard panel settings** (Optional):
+   - **Show adjacent page content:** Toggle whether parts of the page outside the current panel are masked or visible.
+   - **Padding around panel:** Adds a margin (`0%` to `10%`) around the detected panel for the standard view.
+5. **Hold-to-Zoom settings** (Optional):
+   - **Hold-to-Zoom padding:** Adds a safe margin (`2%` to `20%`) around the detected panel to capture overlapping speech bubbles when long-pressing.
    - **Initial zoom level:** Choose how the zoom mode starts (`1.0x Fit` to `2.0x Heavy Zoom`).
-5. **Navigation:**
+6. **Navigation:**
    - Double tap or long-press on a panel to enable panel view.
    - Tap the **edges** of the screen to move between panels or pages.
    - **Hold (Long-press)** anywhere while viewing a panel to trigger the **Free Zoom Mode**.

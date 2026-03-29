@@ -1177,45 +1177,16 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
 
             -- Add Standard Panel options
             table.insert(menu_items, 2, {
-                text = _("Show adjacent page content"),
-                checked_func = function() return self.show_adjacent_panels end,
-                callback = function()
-                    self.show_adjacent_panels = not self.show_adjacent_panels
-                    self:refreshCurrentPanelIfActive()
-                end,
-            })
-
-            table.insert(menu_items, 3, {
-                text = _("Standard panel padding"),
-                sub_item_table = {
-                    {
-                        text = _("None (Tight)"),
-                        checked_func = function() return self.standard_margin_percent == 0.0 end,
-                        callback = function() self.standard_margin_percent = 0.0 end,
-                    },
-                    {
-                        text = _("2% (Small)"),
-                        checked_func = function() return self.standard_margin_percent == 0.02 end,
-                        callback = function() self.standard_margin_percent = 0.02 end,
-                    },
-                    {
-                        text = _("5% (Normal)"),
-                        checked_func = function() return self.standard_margin_percent == 0.05 end,
-                        callback = function() self.standard_margin_percent = 0.05 end,
-                    },
-                    {
-                        text = _("10% (Wide)"),
-                        checked_func = function() return self.standard_margin_percent == 0.10 end,
-                        callback = function() self.standard_margin_percent = 0.10 end,
-                    },
-                },
-                separator = true,
-            })
-            
-            -- Add Standard Panel options
-            table.insert(menu_items, 2, {
                 text = _("Standard panel settings"),
                 sub_item_table = {
+                    {
+                        text = _("Show adjacent page content"),
+                        checked_func = function() return self.show_adjacent_panels end,
+                        callback = function()
+                            self.show_adjacent_panels = not self.show_adjacent_panels
+                            self:refreshCurrentPanelIfActive()
+                        end,
+                    },
                     {
                         text = _("Padding around panel"),
                         sub_item_table = {
