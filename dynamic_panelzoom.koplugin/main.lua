@@ -34,6 +34,7 @@ local PanelZoomIntegration = WidgetContainer:extend{
     standard_margin_percent = 0.0, -- Default 0% extra margin for standard panel-by-panel navigation
     show_adjacent_panels = true,   -- Show adjacent content (Smart Fill)
     zoom_initial_scale = 1.2, -- Default 1.2x initial software scale for the free zoom mode
+    standard_margin_percent = 0.0, -- Default 0% extra margin for standard panel navigation
 }
 
 function PanelZoomIntegration:init()
@@ -305,7 +306,8 @@ function PanelZoomIntegration:preloadNextPanel()
                 local center = self:calculatePanelCenter(next_panel, dim)
                 
                 -- Use helper function for center-preserving quantization
-                local rect = self:panelToRect(next_panel, dim, self.standard_margin_percent)
+                local margin = self.standard_margin_percent or 0.0
+                local rect = self:panelToRect(next_panel, dim, margin)
                 
                 -- Render the next panel with document settings (standard margins for preloading)
                 local image, rotate, custom_position = self:drawPagePartWithSettings(page, rect, center, next_panel, dim)
@@ -834,7 +836,7 @@ function PanelZoomIntegration:panelToRect(panel, dim, apply_margin_percent)
     local bottom_extension = 0
 
     if apply_margin_percent and apply_margin_percent > 0 then
-        -- Free Zoom mode: Apply constant absolute margin based on page size
+        -- Zoom mode (or standard mode with custom margins): Apply constant absolute margin based on page size
         local base_dimension = math.max(dim.w, dim.h)
         local constant_margin = math.floor(base_dimension * apply_margin_percent + 0.5)
         
@@ -842,7 +844,7 @@ function PanelZoomIntegration:panelToRect(panel, dim, apply_margin_percent)
         right_extension = constant_margin
         top_extension = constant_margin
         bottom_extension = constant_margin
-        logger.info(string.format("PanelZoom: Applying constant %.0fpx expanded margins for zoom mode", constant_margin))
+        logger.info(string.format("PanelZoom: Applying constant %.0fpx expanded margins", constant_margin))
     else
         -- Standard Panel Mode: Use default tight constraints
         local panel_aspect_ratio = pw / ph
@@ -967,7 +969,8 @@ function PanelZoomIntegration:switchToZoomMode()
     -- To prevent any visual "jump" when switching to 1.0x, we need to match the exact visual scale 
     -- the user was just looking at in the PanelViewer.
     -- First, calculate what the scale was in the normal PanelViewer:
-    local normal_rect = self:panelToRect(panel, dim) -- Rect without zoom margins
+    local standard_margin = self.standard_margin_percent or 0.0
+    local normal_rect = self:panelToRect(panel, dim, standard_margin) -- Rect with standard panel margins
     local padding = 5
     local safe_w = screen_w - (padding * 2)
     local safe_h = screen_h - (padding * 2)
@@ -1042,7 +1045,8 @@ function PanelZoomIntegration:displayCurrentPanel()
     logger.info(string.format("DynamicPanelZoom: Using document dimensions - w:%d, h:%d", dim.w, dim.h))
 
     -- Use helper function for center-preserving quantization with dynamic frame
-    local rect = self:panelToRect(panel, dim, self.standard_margin_percent)
+    local margin = self.standard_margin_percent or 0.0
+    local rect = self:panelToRect(panel, dim, margin)
     
     -- Calculate and log panel center coordinates
     local center = self:calculatePanelCenter(panel, dim)
@@ -1208,8 +1212,41 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
                 separator = true,
             })
             
-            -- Add Free Zoom options
+            -- Add Standard Panel options
             table.insert(menu_items, 2, {
+                text = _("Standard panel settings"),
+                sub_item_table = {
+                    {
+                        text = _("Padding around panel"),
+                        sub_item_table = {
+                            {
+                                text = _("0% (None)"),
+                                checked_func = function() return self.standard_margin_percent == 0.0 end,
+                                callback = function() self.standard_margin_percent = 0.0 end,
+                            },
+                            {
+                                text = _("2% (Tight)"),
+                                checked_func = function() return self.standard_margin_percent == 0.02 end,
+                                callback = function() self.standard_margin_percent = 0.02 end,
+                            },
+                            {
+                                text = _("5% (Normal)"),
+                                checked_func = function() return self.standard_margin_percent == 0.05 end,
+                                callback = function() self.standard_margin_percent = 0.05 end,
+                            },
+                            {
+                                text = _("10% (Wide)"),
+                                checked_func = function() return self.standard_margin_percent == 0.10 end,
+                                callback = function() self.standard_margin_percent = 0.10 end,
+                            },
+                        }
+                    }
+                },
+                separator = true,
+            })
+            
+            -- Add Free Zoom options
+            table.insert(menu_items, 3, {
                 text = _("Hold-to-Zoom settings"),
                 sub_item_table = {
                     {
