@@ -184,7 +184,7 @@ end
 -- Callback methods for PanelViewer
 -- Spatial navigation methods for PanelViewer
 function PanelZoomIntegration:handleTapRight()
-    if self._is_switching then return end
+    if self._is_switching or self._is_changing_page then return end
     self._is_switching = true
     UIManager:scheduleIn(0.3, function() self._is_switching = false end)
     
@@ -226,7 +226,7 @@ function PanelZoomIntegration:handleTapRight()
 end
 
 function PanelZoomIntegration:handleTapLeft()
-    if self._is_switching then return end
+    if self._is_switching or self._is_changing_page then return end
     self._is_switching = true
     UIManager:scheduleIn(0.3, function() self._is_switching = false end)
     
@@ -504,6 +504,9 @@ function PanelZoomIntegration:changePage(diff)
     -- Clear preloaded cache immediately to prevent ghost images
     self:cleanupPreloadedImage()
 
+    -- Save current state
+    self._is_changing_page = true
+
     -- 1. Use KOReader's built-in page navigation method
     if self.ui.paging and self.ui.paging.onGotoViewRel then
         self.ui.paging:onGotoViewRel(diff)
@@ -530,12 +533,15 @@ function PanelZoomIntegration:changePage(diff)
             -- Moving Backward (diff < 0): Start at index N (Last panel of previous page).
             self.current_panel_index = (diff > 0) and 1 or #self.current_panels
             
-            -- Launch the viewer for the new page
+            -- Only call displayCurrentPanel ONCE the page has changed and panels are imported
+            -- Doing this asynchronously prevents drawing the new panel on the old page's coordinate space
             self:displayCurrentPanel()
         else
             -- No panels on this page, viewer is already closed. Just show info.
             UIManager:show(InfoMessage:new{ text = _("No panels on this page"), timeout = 1 })
+            self:closeViewer()
         end
+        self._is_changing_page = false
     end)
 end
 
