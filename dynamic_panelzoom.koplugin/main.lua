@@ -32,6 +32,7 @@ local PanelZoomIntegration = WidgetContainer:extend{
     reading_direction_override = nil, -- User override for reading direction (rtl/ltr)
     zoom_margin_percent = 0.05, -- Default 5% extra margin for the free zoom mode
     standard_margin_percent = 0.0, -- Default 0% extra margin for standard panel-by-panel navigation
+    show_adjacent_panels = true,   -- Show adjacent content (Smart Fill)
     zoom_initial_scale = 1.2, -- Default 1.2x initial software scale for the free zoom mode
 }
 
@@ -864,6 +865,41 @@ function PanelZoomIntegration:panelToRect(panel, dim, apply_margin_percent)
     render_rect.h = math.min(render_rect.h, dim.h)
     render_rect.x = math.max(0, math.min(render_rect.x, dim.w - render_rect.w))
     render_rect.y = math.max(0, math.min(render_rect.y, dim.h - render_rect.h))
+
+    -- Step 3: Smart Fill (Aspect Ratio Expansion)
+    if self.show_adjacent_panels then
+        local screen_width = Screen:getWidth()
+        local screen_height = Screen:getHeight()
+        -- Handle landscape mode if orientation changed
+        if self.view and self.view.mode == "landscape" then
+            screen_width, screen_height = screen_height, screen_width
+        end
+
+        local screen_ratio = screen_width / screen_height
+        local rect_ratio = render_rect.w / render_rect.h
+
+        if rect_ratio > screen_ratio then
+            -- Rect is wider than screen: need to expand vertically (h)
+            local new_h = render_rect.w / screen_ratio
+            local h_diff = new_h - render_rect.h
+            render_rect.y = math.max(0, render_rect.y - (h_diff / 2))
+            render_rect.h = new_h
+            -- Ensure rect.y + rect.h doesn't exceed page_height (dim.h)
+            if render_rect.y + render_rect.h > dim.h then
+                render_rect.h = dim.h - render_rect.y
+            end
+        elseif rect_ratio < screen_ratio then
+            -- Rect is taller than screen: need to expand horizontally (w)
+            local new_w = render_rect.h * screen_ratio
+            local w_diff = new_w - render_rect.w
+            render_rect.x = math.max(0, render_rect.x - (w_diff / 2))
+            render_rect.w = new_w
+            -- Ensure rect.x + rect.w doesn't exceed page_width (dim.w)
+            if render_rect.x + render_rect.w > dim.w then
+                render_rect.w = dim.w - render_rect.x
+            end
+        end
+    end
     
     logger.info(string.format("PanelZoom: Panel center:(%.1f,%.1f) render_rect:(%d,%d,%dx%d)", 
         panel_cx, panel_cy, render_rect.x, render_rect.y, render_rect.w, render_rect.h))
@@ -1136,6 +1172,15 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
 
             -- Add Standard Panel options
             table.insert(menu_items, 2, {
+                text = _("Show adjacent page content"),
+                checked_func = function() return self.show_adjacent_panels end,
+                callback = function()
+                    self.show_adjacent_panels = not self.show_adjacent_panels
+                    self:refreshCurrentPanelIfActive()
+                end,
+            })
+
+            table.insert(menu_items, 3, {
                 text = _("Standard panel padding"),
                 sub_item_table = {
                     {
