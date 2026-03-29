@@ -884,16 +884,10 @@ function PanelZoomIntegration:panelToRect(panel, dim, apply_margin_percent)
             local total_expansion_needed = target_new_h - render_rect.h
             local expansion_per_side = total_expansion_needed / 2
             
-            -- Calculate how much room we actually have symmetrically
-            local available_top = render_rect.y
-            local available_bottom = dim.h - (render_rect.y + render_rect.h)
-            
-            -- The true expansion is bounded by the smallest available space
-            local actual_expansion = math.min(expansion_per_side, available_top, available_bottom)
-            
-            -- Apply symmetrically
-            render_rect.y = render_rect.y - actual_expansion
-            render_rect.h = render_rect.h + (actual_expansion * 2)
+            -- V4: Apply expansion symmetrically WITHOUT clamping to document bounds
+            -- This allows render_rect.y to be negative and render_rect.h to exceed dim.h
+            render_rect.y = render_rect.y - expansion_per_side
+            render_rect.h = render_rect.h + (expansion_per_side * 2)
             
         elseif rect_ratio < screen_ratio then
             -- Panel is taller than screen: Need to expand horizontally (width)
@@ -901,16 +895,10 @@ function PanelZoomIntegration:panelToRect(panel, dim, apply_margin_percent)
             local total_expansion_needed = target_new_w - render_rect.w
             local expansion_per_side = total_expansion_needed / 2
             
-            -- Calculate how much room we actually have symmetrically
-            local available_left = render_rect.x
-            local available_right = dim.w - (render_rect.x + render_rect.w)
-            
-            -- The true expansion is bounded by the smallest available space
-            local actual_expansion = math.min(expansion_per_side, available_left, available_right)
-            
-            -- Apply symmetrically
-            render_rect.x = render_rect.x - actual_expansion
-            render_rect.w = render_rect.w + (actual_expansion * 2)
+            -- V4: Apply expansion symmetrically WITHOUT clamping to document bounds
+            -- This allows render_rect.x to be negative and render_rect.w to exceed dim.w
+            render_rect.x = render_rect.x - expansion_per_side
+            render_rect.w = render_rect.w + (expansion_per_side * 2)
         end
     end
     
