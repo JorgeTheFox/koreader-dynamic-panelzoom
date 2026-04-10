@@ -24,6 +24,8 @@ local PanelZoomIntegration = WidgetContainer:extend{
     _preloaded_image = nil, -- Pre-rendered next panel
     _preloaded_panel_index = nil, -- Index of preloaded panel
     _is_switching = false, -- Debounce guard to prevent fast tap issues
+    _is_changing_page = false, -- True while a page change is in progress
+    _page_change_diff = nil, -- Direction of current page change (+1 or -1)
     _original_panel_zoom_handler = nil, -- Store original panel zoom handler
     _original_ocr_handler = nil, -- Store original OCR handler
     _original_ocr_menu_enabled = nil, -- Store original OCR menu state
@@ -34,7 +36,6 @@ local PanelZoomIntegration = WidgetContainer:extend{
     standard_margin_percent = 0.0, -- Default 0% extra margin for standard panel-by-panel navigation
     show_adjacent_panels = true,   -- Show adjacent content (Smart Fill)
     zoom_initial_scale = 1.2, -- Default 1.2x initial software scale for the free zoom mode
-    standard_margin_percent = 0.0, -- Default 0% extra margin for standard panel navigation
 }
 
 function PanelZoomIntegration:init()
@@ -43,11 +44,17 @@ function PanelZoomIntegration:init()
         self:checkAndIntegratePanelZoom()
     end
     
-    -- Auto-refresh JSON detection when page changes
-    self.onPageUpdate = function()
-        -- Always re-check JSON availability on page changes
-        -- This ensures detection if JSON files are added/removed during reading
-        self:checkAndIntegratePanelZoom()
+    -- Page change handler: event-driven panel transitions
+    -- KOReader dispatches PageUpdate as: handler(self, new_page_no, orig_mode)
+    -- When _is_changing_page is true, the event was triggered by our changePage()
+    -- call to onGotoViewRel(), so we handle the panel transition.
+    -- Otherwise it's a normal page change (user swipe, menu, etc.)
+    self.onPageUpdate = function(_, new_page_no)
+        if self._is_changing_page then
+            self:_onPageChangeComplete(new_page_no)
+        else
+            self:checkAndIntegratePanelZoom()
+        end
     end
     
     -- Optional: Re-render current panel if document settings change
@@ -269,6 +276,10 @@ end
 
 function PanelZoomIntegration:closeViewer()
     if self._current_imgviewer then
+        -- Ensure E-Ink refresh suppression is restored if we were mid-page-change
+        if UIManager.currently_scrolling then
+            UIManager.currently_scrolling = false
+        end
         UIManager:close(self._current_imgviewer)
         self._current_imgviewer = nil
         self:cleanupPreloadedImage()
@@ -504,44 +515,73 @@ function PanelZoomIntegration:changePage(diff)
     -- Clear preloaded cache immediately to prevent ghost images
     self:cleanupPreloadedImage()
 
-    -- Save current state
+    -- Save current state for the event-driven flow
     self._is_changing_page = true
+    self._page_change_diff = diff
 
-    -- 1. Use KOReader's built-in page navigation method
+    -- FLASH PREVENTION: Suppress E-Ink screen refreshes while KOReader
+    -- renders the new page underneath our PanelViewer.
+    -- `currently_scrolling = true` forces all refresh modes to "fast" (no flash).
+    UIManager.currently_scrolling = true
+
+    -- Safety net: ensure currently_scrolling is restored even if something
+    -- goes wrong. This prevents permanently blocking all E-Ink refreshes.
+    UIManager:scheduleIn(1.0, function()
+        if UIManager.currently_scrolling then
+            logger.warn("DynamicPanelZoom: Safety net restored currently_scrolling to false")
+            UIManager.currently_scrolling = false
+        end
+    end)
+
+    -- Trigger page navigation.
+    -- onGotoViewRel is SYNCHRONOUS: it calls _gotoPage() which emits PageUpdate
+    -- before returning. Our onPageUpdate handler will detect _is_changing_page
+    -- and call _onPageChangeComplete() via nextTick.
     if self.ui.paging and self.ui.paging.onGotoViewRel then
         self.ui.paging:onGotoViewRel(diff)
         logger.info(string.format("DynamicPanelZoom: Used ui.paging.onGotoViewRel(%d)", diff))
     else
-        -- Fallback to key event
+        -- Fallback to key event — this path does NOT guarantee a PageUpdate event,
+        -- so we handle it directly with nextTick as a safety measure.
         local key = diff > 0 and "Right" or "Left"
         UIManager:sendEvent({ key = key, modifiers = {} })
         logger.info(string.format("DynamicPanelZoom: Used %s key event as fallback", key))
+        -- Since key events may not trigger onPageUpdate synchronously,
+        -- schedule the completion handler ourselves.
+        self:_onPageChangeComplete(nil)
     end
-        
-    -- 2. Wait for the engine to render the new page, then update viewer content
-    UIManager:scheduleIn(0.4, function()
-        local new_page = self:getSafePageNumber()
-        logger.info(string.format("DynamicPanelZoom: Changed to page %d (diff: %d)", new_page, diff))
+end
+
+-- Handle page change completion. Called by onPageUpdate (event-driven) or
+-- directly from changePage() fallback path. Uses nextTick to ensure all
+-- other PageUpdate handlers (ReaderView, ReaderZooming, etc.) have finished
+-- processing before we load our panel.
+function PanelZoomIntegration:_onPageChangeComplete(new_page_no)
+    UIManager:nextTick(function()
+        -- Restore normal refresh behavior now that we're ready to show our panel
+        UIManager.currently_scrolling = false
+        -- Prevent the partial->full flash promotion counter from triggering
+        UIManager:avoidFlashOnNextRepaint()
+
+        local new_page = new_page_no or self:getSafePageNumber()
+        local diff = self._page_change_diff or 1
+        logger.info(string.format("DynamicPanelZoom: Page change complete - page %d (diff: %d)", new_page, diff))
         self.last_page_seen = new_page
-        
+
         self:importToggleZoomPanels()
-        
+
         if #self.current_panels > 0 then
-            -- Note: In our spatial mapping, index 1 is always top-left(LTR) or top-right(RTL).
-            -- Index #current_panels is always bottom-right(LTR) or bottom-left(RTL).
-            -- Moving Forward (diff > 0): Start at index 1 (First panel of new page).
-            -- Moving Backward (diff < 0): Start at index N (Last panel of previous page).
+            -- Moving Forward (diff > 0): Start at first panel of new page.
+            -- Moving Backward (diff < 0): Start at last panel of previous page.
             self.current_panel_index = (diff > 0) and 1 or #self.current_panels
-            
-            -- Only call displayCurrentPanel ONCE the page has changed and panels are imported
-            -- Doing this asynchronously prevents drawing the new panel on the old page's coordinate space
             self:displayCurrentPanel()
         else
-            -- No panels on this page, viewer is already closed. Just show info.
             UIManager:show(InfoMessage:new{ text = _("No panels on this page"), timeout = 1 })
             self:closeViewer()
         end
+
         self._is_changing_page = false
+        self._page_change_diff = nil
     end)
 end
 
@@ -1118,14 +1158,14 @@ function PanelZoomIntegration:displayCurrentPanel()
     logger.info("DynamicPanelZoom: Showing new PanelViewer")
     UIManager:show(panel_viewer)
     
-    -- KOADER MUFPDF LOGIC: Use flashui refresh for initial panel display
-    -- This ensures crisp rendering like KOReader's ImageViewer
-    -- Enable dithering for E-ink displays to prevent artifacts
+    -- Use "ui" refresh for initial panel display to avoid E-Ink flash.
+    -- "flashui" would cause a visible full-screen flash on E-Ink devices.
+    -- Dithering is still enabled for image quality on grayscale E-Ink displays.
     UIManager:setDirty(panel_viewer, function()
-        return "flashui", panel_viewer.dimen, Screen.sw_dithering  -- Enable dithering for E-ink
+        return "ui", panel_viewer.dimen, Screen.sw_dithering  -- Enable dithering for E-ink
     end)
     
-    logger.info("DynamicPanelZoom: New PanelViewer shown with KOReader refresh logic")
+    logger.info("DynamicPanelZoom: New PanelViewer shown with flash-free refresh")
     
     -- Start preloading the next panel after a short delay
     UIManager:scheduleIn(0.2, function()
