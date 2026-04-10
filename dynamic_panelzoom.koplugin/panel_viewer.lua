@@ -27,6 +27,7 @@ local PanelViewer = InputContainer:extend{
     
     -- Display properties
     fullscreen = true,
+    covers_fullscreen = true,  -- Prevents UIManager from repainting widgets below us (avoids E-Ink flash on page change)
     buttons_visible = false,
     
     -- Panel-specific properties
