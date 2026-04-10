@@ -21,7 +21,7 @@ No pre-processing, external scripts, or JSON files required—it analyzes the pa
 3. Restart KOReader.
 
 ## Usage
-1. Open a comic (`.cbz`, `.pdf`, etc.) in **full-screen mode** (fit = full and view mode = page).
+1. Open a comic (`.cbz`, `.pdf`, etc.) in "full page mode": fit = full and view mode = page (see the gif above).
 2. Go to the top menu, tap on the document tab and check **Allow panel zoom**.
 3. Select **Reading direction**:
    - **Left-to-Right (LTR)** for Western comics
@@ -39,7 +39,7 @@ No pre-processing, external scripts, or JSON files required—it analyzes the pa
    - Tap the **center** to exit panel view.
 
 ## Known Issues
-- **Fullscreen Only:** KOReader UI bars must be hidden when activating Panel Zoom, or coordinate detection may fail.
+- **Full page mode Only:** If you use the plugin without full page view, you may see some repeated panels.
 
 - *Tested primarily on Linux (Native/AppImage) and Kindle Colorsoft (2025).*
 
