@@ -286,6 +286,11 @@ function PanelZoomIntegration:closeViewer()
         -- Restore OCR when panel viewer is closed
         self:restoreOCR()
     end
+    -- Always clear in-flight page-change state on exit so re-entering panel
+    -- view on a new page can't inherit a stuck _is_changing_page from a
+    -- prior session where onPageUpdate didn't fire.
+    self._is_changing_page = false
+    self._page_change_diff = nil
 end
 
 -- Preload the next panel in background
@@ -524,12 +529,21 @@ function PanelZoomIntegration:changePage(diff)
     -- `currently_scrolling = true` forces all refresh modes to "fast" (no flash).
     UIManager.currently_scrolling = true
 
-    -- Safety net: ensure currently_scrolling is restored even if something
-    -- goes wrong. This prevents permanently blocking all E-Ink refreshes.
+    -- Safety net: if onPageUpdate never fires (legacy Kindle builds, missed
+    -- events, etc.), _is_changing_page would stay true forever and silently
+    -- drop every subsequent handleTapRight/Left/Key navigation, making the
+    -- viewer look softlocked. Force-reset both the E-Ink refresh suppression
+    -- and the page-change flag after 1s so the worst case is a 1s delay, not
+    -- a permanent dead viewer.
     UIManager:scheduleIn(1.0, function()
         if UIManager.currently_scrolling then
             logger.warn("DynamicPanelZoom: Safety net restored currently_scrolling to false")
             UIManager.currently_scrolling = false
+        end
+        if self._is_changing_page then
+            logger.warn("DynamicPanelZoom: Safety net forced _is_changing_page to false (onPageUpdate likely never fired)")
+            self._is_changing_page = false
+            self._page_change_diff = nil
         end
     end)
 
