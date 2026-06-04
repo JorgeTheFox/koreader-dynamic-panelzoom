@@ -40,6 +40,8 @@ local PanelZoomIntegration = WidgetContainer:extend{
 }
 
 function PanelZoomIntegration:init()
+    self.experimental_panel_sorting_enabled = false
+
     -- Auto-detect JSON and integrate with Panel Zoom when document is opened
     self.onDocumentLoaded = function()
         self:checkAndIntegratePanelZoom()
@@ -706,7 +708,11 @@ function PanelZoomIntegration:importToggleZoomPanels()
     end
     
     logger.info(string.format("DynamicPanelZoom: Analyzing page %d for %s panels dynamically", page_idx, reading_dir))
-    self.current_panels = self:analyzePageForPanels(page_idx)
+    if self.experimental_panel_sorting_enabled then
+        self.current_panels = self:analyzePageForPanelsExperimental(page_idx)
+    else
+        self.current_panels = self:analyzePageForPanels(page_idx)
+    end
     
     -- Cache it for this document and page and direction
     self._panel_cache[doc_path][reading_dir][page_idx] = self.current_panels
@@ -862,7 +868,216 @@ function PanelZoomIntegration:analyzePageForPanels(pageno)
     return panels
 end
 
+function PanelZoomIntegration:analyzePageForPanelsExperimental(pageno)
+    local ffi = require("ffi")
+    local leptonica = ffi.loadlib("leptonica", "6")
+    
+    if not self.ui.document or not self.ui.document._document then return {} end
+    
+    local KOPTContext = require("ffi/koptcontext")
+    local page_size = self.ui.document:getNativePageDimensions(pageno)
+    
+    if not page_size then return {} end
+    
+    local target_w = page_size.w
+    local target_h = page_size.h
+    
+    local bbox = {
+        x0 = 0, y0 = 0,
+        x1 = target_w,
+        y1 = target_h,
+    }
+    
+    local Document = require("document/document")
+    local koptinterface
+    if self.ui.document.koptinterface then
+        koptinterface = self.ui.document.koptinterface
+    end
+    
+    local kc
+    if koptinterface and koptinterface.createContext then
+        kc = koptinterface:createContext(self.ui.document, pageno, bbox)
+    else
+        kc = KOPTContext.new()
+        kc:setZoom(1.0)
+        kc:setBBox(bbox.x0, bbox.y0, bbox.x1, bbox.y1)
+    end
+    
+    local page = self.ui.document._document:openPage(pageno)
+    if not page then 
+        if kc.free then kc:free() end
+        return {} 
+    end
+    
+    page:getPagePix(kc, self.ui.document.render_mode)
+    
+    local initial_boxes = {}
+    
+    if kc.src.data then
+        local KOPTContextClass = require("ffi/koptcontext")
+        local k2pdfopt = KOPTContextClass.k2pdfopt
+        
+        local function _gc_ptr(p, destructor)
+            return p and ffi.gc(p, destructor)
+        end
+        local function pixDestroy(pix)
+            leptonica.pixDestroy(ffi.new('PIX *[1]', pix))
+            ffi.gc(pix, nil)
+        end
+        local function boxDestroy(box)
+            leptonica.boxDestroy(ffi.new('BOX *[1]', box))
+            ffi.gc(box, nil)
+        end
+        local function boxaDestroy(boxa)
+            leptonica.boxaDestroy(ffi.new('BOXA *[1]', boxa))
+            ffi.gc(boxa, nil)
+        end
 
+        local pixs = _gc_ptr(k2pdfopt.bitmap2pix(kc.src, 0, 0, kc.src.width, kc.src.height), pixDestroy)
+        
+        local pixg
+        if leptonica.pixGetDepth(pixs) == 32 then
+            pixg = leptonica.pixConvertRGBToGrayFast(pixs)
+        else
+            pixg = leptonica.pixClone(pixs)
+        end
+        pixg = _gc_ptr(pixg, pixDestroy)
+        
+        local pix_inverted = _gc_ptr(leptonica.pixInvert(nil, pixg), pixDestroy)
+        local pix_thresholded = _gc_ptr(leptonica.pixThresholdToBinary(pix_inverted, 50), pixDestroy)
+        leptonica.pixInvert(pix_thresholded, pix_thresholded)
+        
+        local bb = _gc_ptr(leptonica.pixConnCompBB(pix_thresholded, 8), boxaDestroy)
+        
+        local img_w = leptonica.pixGetWidth(pixs)
+        local img_h = leptonica.pixGetHeight(pixs)
+        
+        local function boxGetGeometry(box)
+            local geo = ffi.new('l_int32[4]')
+            leptonica.boxGetGeometry(box, geo, geo + 1, geo + 2, geo + 3)
+            return tonumber(geo[0]), tonumber(geo[1]), tonumber(geo[2]), tonumber(geo[3])
+        end
+
+        local count = leptonica.boxaGetCount(bb)
+        for index = 0, count - 1 do
+            local box = _gc_ptr(leptonica.boxaGetBox(bb, index, leptonica.L_CLONE), boxDestroy)
+            
+            -- We don't filter during extraction, we just get all boxes
+            local box_x, box_y, box_w, box_h = boxGetGeometry(box)
+            table.insert(initial_boxes, {
+                x = box_x / target_w,
+                y = box_y / target_h,
+                w = box_w / target_w,
+                h = box_h / target_h,
+            })
+        end
+    end
+    
+    page:close()
+    if kc.free then kc:free() end
+
+    logger.info(string.format("DynamicPanelZoom (Experimental): Extracted %d raw components from Leptonica", #initial_boxes))
+
+    -- 3.1 Minimum area filter
+    local filtered_boxes = {}
+    local min_area_threshold = 0.02 -- 2% of page area
+    for _, box in ipairs(initial_boxes) do
+        local area = box.w * box.h
+        -- Also check minimum w/h proportions to avoid extremely thin lines being accepted
+        if area >= min_area_threshold and box.w > 0.05 and box.h > 0.05 then
+            table.insert(filtered_boxes, box)
+        end
+    end
+
+    -- 3.2 Nesting check (discard boxes completely contained in others)
+    local final_boxes = {}
+    for i, box1 in ipairs(filtered_boxes) do
+        local is_nested = false
+        for j, box2 in ipairs(filtered_boxes) do
+            if i ~= j then
+                -- Add a small margin of error (0.01) for the nesting check
+                if box1.x >= box2.x - 0.01 and box1.y >= box2.y - 0.01 and 
+                   (box1.x + box1.w) <= (box2.x + box2.w) + 0.01 and 
+                   (box1.y + box1.h) <= (box2.y + box2.h) + 0.01 then
+                    is_nested = true
+                    break
+                end
+            end
+        end
+        if not is_nested then
+            table.insert(final_boxes, box1)
+        end
+    end
+
+    logger.info(string.format("DynamicPanelZoom (Experimental): %d components remaining after filtering", #final_boxes))
+
+    -- 4.1 Sort vertically by top `y` coordinate
+    table.sort(final_boxes, function(a, b)
+        return a.y < b.y
+    end)
+
+    -- 4.2 Group into rows by intersection
+    local rows = {}
+    local current_row = {}
+    local current_row_min_y = nil
+    local current_row_max_y = nil
+
+    for _, box in ipairs(final_boxes) do
+        if #current_row == 0 then
+            table.insert(current_row, box)
+            current_row_min_y = box.y
+            current_row_max_y = box.y + box.h
+        else
+            -- Check intersection with current row bounds
+            local box_max_y = box.y + box.h
+            -- A box intersects the row if its top is before row's bottom, and its bottom is after row's top
+            -- Adding a small margin
+            local margin = 0.05
+            if box.y < current_row_max_y - margin and box_max_y > current_row_min_y + margin then
+                -- Belongs to current row
+                table.insert(current_row, box)
+                -- Update row bounds
+                current_row_min_y = math.min(current_row_min_y, box.y)
+                current_row_max_y = math.max(current_row_max_y, box_max_y)
+            else
+                -- Start a new row
+                table.insert(rows, current_row)
+                current_row = {box}
+                current_row_min_y = box.y
+                current_row_max_y = box.y + box.h
+            end
+        end
+    end
+    if #current_row > 0 then
+        table.insert(rows, current_row)
+    end
+
+    -- 4.3 Sort each row horizontally and 4.4 Concatenate
+    local effective_dir = self:getEffectiveReadingDirection()
+    local final_panels = {}
+    
+    for row_idx, row in ipairs(rows) do
+        table.sort(row, function(a, b)
+            if effective_dir == "rtl" then
+                return a.x > b.x
+            else
+                return a.x < b.x
+            end
+        end)
+        
+        for _, box in ipairs(row) do
+            table.insert(final_panels, box)
+        end
+    end
+
+    -- 5.1 Debug log the final ordered panel sequence
+    logger.info(string.format("DynamicPanelZoom (Experimental): Final sequence (%d panels, %d rows) for %s reading direction:", #final_panels, #rows, effective_dir))
+    for i, p in ipairs(final_panels) do
+        logger.info(string.format("  Panel %d: x=%.3f, y=%.3f, w=%.3f, h=%.3f", i, p.x, p.y, p.w, p.h))
+    end
+
+    return final_panels
+end
 
 function PanelZoomIntegration:calculatePanelCenter(panel, dim)
     -- Calculate absolute center coordinates from panel JSON data
@@ -1368,6 +1583,26 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
                                 callback = function() self.zoom_initial_scale = 2.0 end,
                             },
                         }
+                    },
+                },
+                separator = true,
+            })
+            
+            -- Add Experimental features
+            table.insert(menu_items, 5, {
+                text = _("Experimental features"),
+                sub_item_table = {
+                    {
+                        text = _("Experimental Panel Sorting (Z-pattern)"),
+                        checked_func = function() return self.experimental_panel_sorting_enabled end,
+                        callback = function()
+                            self.experimental_panel_sorting_enabled = not self.experimental_panel_sorting_enabled
+                            logger.info("DynamicPanelZoom: Experimental Panel Sorting set to " .. tostring(self.experimental_panel_sorting_enabled))
+                            -- Invalidate cache so page is re-analyzed
+                            self._panel_cache = {}
+                            self.current_panels = {}
+                            self:refreshCurrentPanelIfActive()
+                        end,
                     },
                 },
                 separator = true,
