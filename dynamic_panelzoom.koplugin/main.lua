@@ -36,6 +36,7 @@ local PanelZoomIntegration = WidgetContainer:extend{
     standard_margin_percent = 0.0, -- Default 0% extra margin for standard panel-by-panel navigation
     show_adjacent_panels = true,   -- Show adjacent content (Smart Fill)
     zoom_initial_scale = 1.2, -- Default 1.2x initial software scale for the free zoom mode
+    panelzoom_tap_forward_zone = "auto", -- auto, left, or right
 }
 
 function PanelZoomIntegration:init()
@@ -195,17 +196,27 @@ function PanelZoomIntegration:handleTapRight()
     self._is_switching = true
     UIManager:scheduleIn(0.3, function() self._is_switching = false end)
     
+    local tap_forward_zone = self.panelzoom_tap_forward_zone or "auto"
     local reading_dir = self:getEffectiveReadingDirection()
     local is_rtl = reading_dir == "rtl"
     
-    -- In absolute spatial terms:
-    -- If LTR: Right tap means "go to next panel" (index + 1 in the correctly sorted array)
-    -- If RTL: Right tap means "go to previous panel" (index - 1 in the correctly sorted array)
-    if not is_rtl then
-        -- LTR Flow
-        -- Check preload first for LTR Next
+    logger.info(string.format("DynamicPanelZoom: handleTapRight index=%d, is_rtl=%s, reading_dir=%s", 
+        self.current_panel_index, tostring(is_rtl), reading_dir))
+    
+    local intent_forward = false
+    if tap_forward_zone == "right" then
+        intent_forward = true
+    elseif tap_forward_zone == "left" then
+        intent_forward = false
+    else
+        intent_forward = not is_rtl
+    end
+    
+    if intent_forward then
+        -- Forward Flow
+        -- Check preload first for Next
         if self._preloaded_image and self._preloaded_panel_index == self.current_panel_index + 1 then
-            logger.info("PanelZoom: Using preloaded panel for instant switch (LTR Right)")
+            logger.info("PanelZoom: Using preloaded panel for instant switch (Forward)")
             self.current_panel_index = self.current_panel_index + 1
             self:displayPreloadedPanel()
             return
@@ -215,18 +226,18 @@ function PanelZoomIntegration:handleTapRight()
             self.current_panel_index = self.current_panel_index + 1
             self:displayCurrentPanel()
         else
-            -- LTR: End of page, right tap goes to next page
-            logger.info("PanelZoom: Bottom-right reached (LTR), jumping to next page")
+            -- End of page, go to next page
+            logger.info("PanelZoom: End of page reached, jumping to next page")
             self:changePage(1)
         end
     else
-        -- RTL Flow: Right tap goes backwards in reading order (index - 1)
+        -- Backward Flow
         if self.current_panel_index > 1 then
             self.current_panel_index = self.current_panel_index - 1
             self:displayCurrentPanel()
         else
-            -- RTL: Top-right reached, right tap goes to previous page
-            logger.info("PanelZoom: Top-right reached (RTL), jumping to previous page")
+            -- Top of page reached, go to previous page
+            logger.info("PanelZoom: Top of page reached, jumping to previous page")
             self:changePage(-1)
         end
     end
@@ -237,27 +248,27 @@ function PanelZoomIntegration:handleTapLeft()
     self._is_switching = true
     UIManager:scheduleIn(0.3, function() self._is_switching = false end)
     
+    local tap_forward_zone = self.panelzoom_tap_forward_zone or "auto"
     local reading_dir = self:getEffectiveReadingDirection()
     local is_rtl = reading_dir == "rtl"
     
-    -- In absolute spatial terms:
-    -- If LTR: Left tap means "go to previous panel" (index - 1)
-    -- If RTL: Left tap means "go to next panel" (index + 1)
-    if not is_rtl then
-        -- LTR Flow: Left tap goes backwards
-        if self.current_panel_index > 1 then
-            self.current_panel_index = self.current_panel_index - 1
-            self:displayCurrentPanel()
-        else
-            -- LTR: Top-left reached, left tap goes to previous page
-            logger.info("PanelZoom: Top-left reached (LTR), jumping to previous page")
-            self:changePage(-1)
-        end
+    logger.info(string.format("DynamicPanelZoom: handleTapLeft index=%d, is_rtl=%s, reading_dir=%s", 
+        self.current_panel_index, tostring(is_rtl), reading_dir))
+    
+    local intent_forward = false
+    if tap_forward_zone == "left" then
+        intent_forward = true
+    elseif tap_forward_zone == "right" then
+        intent_forward = false
     else
-        -- RTL Flow: Left tap goes forwards (index + 1)
-        -- Check preload first for RTL Next
+        intent_forward = is_rtl
+    end
+    
+    if intent_forward then
+        -- Forward Flow
+        -- Check preload first for Next
         if self._preloaded_image and self._preloaded_panel_index == self.current_panel_index + 1 then
-            logger.info("PanelZoom: Using preloaded panel for instant switch (RTL Left)")
+            logger.info("PanelZoom: Using preloaded panel for instant switch (Forward)")
             self.current_panel_index = self.current_panel_index + 1
             self:displayPreloadedPanel()
             return
@@ -267,9 +278,19 @@ function PanelZoomIntegration:handleTapLeft()
             self.current_panel_index = self.current_panel_index + 1
             self:displayCurrentPanel()
         else
-            -- RTL: Bottom-left reached, left tap goes to next page
-            logger.info("PanelZoom: Bottom-left reached (RTL), jumping to next page")
+            -- End of page, go to next page
+            logger.info("PanelZoom: End of page reached, jumping to next page")
             self:changePage(1)
+        end
+    else
+        -- Backward Flow
+        if self.current_panel_index > 1 then
+            self.current_panel_index = self.current_panel_index - 1
+            self:displayCurrentPanel()
+        else
+            -- Top of page reached, go to previous page
+            logger.info("PanelZoom: Top of page reached, jumping to previous page")
+            self:changePage(-1)
         end
     end
 end
@@ -1221,8 +1242,40 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
                 separator = true,
             })
 
-            -- Add Standard Panel options
+            -- Add Tap Zone settings
             table.insert(menu_items, 2, {
+                text = _("Next panel tap zone"),
+                sub_item_table = {
+                    {
+                        text = _("Auto (based on reading direction)"),
+                        checked_func = function() return self.panelzoom_tap_forward_zone == "auto" end,
+                        callback = function()
+                            self.panelzoom_tap_forward_zone = "auto"
+                            logger.info("DynamicPanelZoom: Tap forward zone set to auto")
+                        end,
+                    },
+                    {
+                        text = _("Left side"),
+                        checked_func = function() return self.panelzoom_tap_forward_zone == "left" end,
+                        callback = function()
+                            self.panelzoom_tap_forward_zone = "left"
+                            logger.info("DynamicPanelZoom: Tap forward zone set to left")
+                        end,
+                    },
+                    {
+                        text = _("Right side"),
+                        checked_func = function() return self.panelzoom_tap_forward_zone == "right" end,
+                        callback = function()
+                            self.panelzoom_tap_forward_zone = "right"
+                            logger.info("DynamicPanelZoom: Tap forward zone set to right")
+                        end,
+                    },
+                },
+                separator = true,
+            })
+
+            -- Add Standard Panel options
+            table.insert(menu_items, 3, {
                 text = _("Standard panel settings"),
                 sub_item_table = {
                     {
@@ -1263,7 +1316,7 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
             })
             
             -- Add Free Zoom options
-            table.insert(menu_items, 3, {
+            table.insert(menu_items, 4, {
                 text = _("Hold-to-Zoom settings"),
                 sub_item_table = {
                     {
