@@ -25,6 +25,7 @@ metadata.*.lua
 *.zip
 *.tar.gz
 local_resources/
+openspec/
 
 # Markdown files (except README)
 *.md
