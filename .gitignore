@@ -27,6 +27,7 @@ metadata.*.lua
 local_resources/
 openspec/
 
-# Markdown files (except README)
+# Markdown files (except README and AGENTS)
 *.md
 !README.md
+!AGENTS.md
