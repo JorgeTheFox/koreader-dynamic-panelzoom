@@ -90,6 +90,21 @@ function PanelViewer:setupTouchZones()
             }
         }
     }
+
+    -- Register hardware keys (Boox, Kindle, Kobo, etc.).
+    -- Using input groups rather than raw key names keeps this device-agnostic
+    -- and automatically honors the user's "Invert page-turn buttons" setting.
+    -- KeyClose is essential on touchless Kindles (K4 NT, K2/K3 Keyboard) where
+    -- the center-tap exit is unreachable.
+    -- Event names are prefixed Key* so they cannot collide with the onNext/
+    -- onPrev/onClose *callback* fields the class exposes for tap dispatch.
+    if Device:hasKeys() then
+        self.key_events = {
+            KeyNext  = { { Device.input.group.PgFwd } },
+            KeyPrev  = { { Device.input.group.PgBack } },
+            KeyClose = { { Device.input.group.Back } },
+        }
+    end
 end
 
 function PanelViewer:loadImage()
@@ -195,6 +210,32 @@ end
 function PanelViewer:onHold(_, ges)
     logger.info("PanelViewer: Hold gesture detected, triggering zoom mode")
     if self.onHold then self.onHold() end
+    return true
+end
+
+function PanelViewer:onKeyNext()
+    logger.info("PanelViewer: PgFwd key received, forwarding to next panel")
+    if self.reading_direction == "rtl" then
+        if self.onTapLeft then self.onTapLeft() end
+    else
+        if self.onTapRight then self.onTapRight() end
+    end
+    return true
+end
+
+function PanelViewer:onKeyPrev()
+    logger.info("PanelViewer: PgBack key received, forwarding to previous panel")
+    if self.reading_direction == "rtl" then
+        if self.onTapRight then self.onTapRight() end
+    else
+        if self.onTapLeft then self.onTapLeft() end
+    end
+    return true
+end
+
+function PanelViewer:onKeyClose()
+    logger.info("PanelViewer: Back key received, closing viewer")
+    if self.onClose then self.onClose() end
     return true
 end
 
