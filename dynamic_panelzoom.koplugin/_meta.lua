@@ -3,5 +3,5 @@ return {
     fullname = "Dynamic Panel Zoom",
     description = "Enhanced comic reading with dynamic, real-time panel detection and navigation",
     author = "KOReader Community",
-    version = "1.6.3",
+    version = "1.7.0",
 }
