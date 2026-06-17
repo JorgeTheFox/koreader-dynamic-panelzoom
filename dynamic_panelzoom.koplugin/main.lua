@@ -475,8 +475,17 @@ function PanelZoomIntegration:drawPagePartWithSettings(pageno, rect, panel_cente
     scaled_rect:transformByScale(final_scale, final_scale)
     rect.scaled_rect = scaled_rect
 
-    local tile = self.ui.document:renderPage(pageno, rect, final_scale, 0, gamma, true)
-    local image = tile.bb
+    local tile
+    local renderPage = self.ui.document.renderPage
+    local info = debug.getinfo(renderPage, "u")
+    if info and info.nparams and info.nparams >= 8 then
+        -- New signature: pageno, rect, zoom, rotation, gamma, saturation, hinting
+        tile = self.ui.document:renderPage(pageno, rect, final_scale, 0, gamma, 1.0, true)
+    else
+        -- Old signature: pageno, rect, zoom, rotation, gamma, hinting
+        tile = self.ui.document:renderPage(pageno, rect, final_scale, 0, gamma, true)
+    end
+    local image = tile and tile.bb
 
     -- 8. POST-PROCESSING
     if image then
