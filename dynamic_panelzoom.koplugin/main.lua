@@ -1,4 +1,3 @@
-local Device = require("device")
 local Dispatcher = require("dispatcher")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -37,6 +36,8 @@ local PanelZoomIntegration = WidgetContainer:extend{
     show_adjacent_panels = true,   -- Show adjacent content (Smart Fill)
     zoom_initial_scale = 1.2, -- Default 1.2x initial software scale for the free zoom mode
     panelzoom_tap_forward_zone = "auto", -- auto, left, or right
+    auto_rotate_enabled = true,
+    _original_rotation_mode = nil,
 }
 
 function PanelZoomIntegration:init()
@@ -308,6 +309,11 @@ function PanelZoomIntegration:closeViewer()
         self:cleanupPreloadedImage()
         -- Restore OCR when panel viewer is closed
         self:restoreOCR()
+    end
+    -- Restore screen rotation set by auto-rotate
+    if self._original_rotation_mode ~= nil then
+        Screen:setRotationMode(self._original_rotation_mode)
+        self._original_rotation_mode = nil
     end
     -- Always clear in-flight page-change state on exit so re-entering panel
     -- view on a new page can't inherit a stuck _is_changing_page from a
@@ -1322,6 +1328,40 @@ function PanelZoomIntegration:switchToZoomMode()
     return true
 end
 
+-- Rotate the screen to match panel orientation (landscape for wide, portrait for tall).
+-- Saves the pre-zoom rotation on first call so closeViewer() can restore it.
+-- Returns true if the rotation mode actually changed.
+function PanelZoomIntegration:applyAutoRotation(panel, dim)
+    if not self.auto_rotate_enabled then return false end
+
+    local current_mode = Screen:getRotationMode()
+
+    -- Save original mode once, before we change anything
+    if self._original_rotation_mode == nil then
+        self._original_rotation_mode = current_mode
+    end
+
+    local panel_w = panel.w * dim.w
+    local panel_h = panel.h * dim.h
+    local want_landscape = panel_w > panel_h
+    -- Rotation modes 1 (CW) and 3 (CCW) are landscape; 0 and 2 are portrait
+    local is_landscape = (current_mode == 1 or current_mode == 3)
+
+    if want_landscape == is_landscape then return false end
+
+    if want_landscape then
+        Screen:setRotationMode(1) -- DEVICE_ROTATED_CLOCKWISE
+        logger.info("DynamicPanelZoom: Auto-rotated to landscape for wide panel")
+    else
+        -- Return to original portrait mode, fall back to upright (0) if original was landscape
+        local orig = self._original_rotation_mode
+        local target = (orig == 0 or orig == 2) and orig or 0
+        Screen:setRotationMode(target)
+        logger.info("DynamicPanelZoom: Auto-rotated to portrait for tall panel")
+    end
+    return true
+end
+
 function PanelZoomIntegration:displayCurrentPanel()
     logger.info("DynamicPanelZoom: displayCurrentPanel called")
     local panel = self.current_panels[self.current_panel_index]
@@ -1339,6 +1379,20 @@ function PanelZoomIntegration:displayCurrentPanel()
         return false 
     end
     logger.info(string.format("DynamicPanelZoom: Using document dimensions - w:%d, h:%d", dim.w, dim.h))
+
+    -- Rotate screen to match panel orientation before rendering so Screen:getWidth/Height
+    -- return the correct dimensions for the new orientation.
+    local rotated = self:applyAutoRotation(panel, dim)
+    if rotated then
+        -- Preloaded image was rendered for the old orientation; discard it.
+        self:cleanupPreloadedImage()
+        -- Close the existing viewer so PanelViewer:init() rebuilds gesture zones
+        -- at the correct screen size after rotation.
+        if self._current_imgviewer then
+            UIManager:close(self._current_imgviewer)
+            self._current_imgviewer = nil
+        end
+    end
 
     -- Use helper function for center-preserving quantization with dynamic frame
     local margin = self.standard_margin_percent or 0.0
@@ -1507,6 +1561,18 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
             table.insert(menu_items, 3, {
                 text = _("Standard panel settings"),
                 sub_item_table = {
+                    {
+                        text = _("Auto-rotate for panel orientation"),
+                        checked_func = function() return self.auto_rotate_enabled end,
+                        callback = function()
+                            self.auto_rotate_enabled = not self.auto_rotate_enabled
+                            -- If disabled while rotated, restore immediately
+                            if not self.auto_rotate_enabled and self._original_rotation_mode ~= nil then
+                                Screen:setRotationMode(self._original_rotation_mode)
+                                self._original_rotation_mode = nil
+                            end
+                        end,
+                    },
                     {
                         text = _("Show adjacent page content"),
                         checked_func = function() return self.show_adjacent_panels end,
