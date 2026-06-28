@@ -885,17 +885,11 @@ function PanelZoomIntegration:analyzePageForPanels(pageno)
     local has_full_page = self.display_full_page_before or self.display_full_page_after
     if has_panels and has_full_page then
         if self.display_full_page_before then
-            table.insert(panels, 1, {
-                x = 0, y = 0, w = 1, h = 1,
-                isFullPage = true
-            })
+            table.insert(panels, 1, { x = 0, y = 0, w = 1, h = 1})
         end
 
         if self.display_full_page_after then
-            table.insert(panels, {
-                x = 0, y = 0, w = 1, h = 1,
-                isFullPage = true
-            })
+            table.insert(panels, { x = 0, y = 0, w = 1, h = 1,})
         end
     end
     
@@ -1115,17 +1109,11 @@ function PanelZoomIntegration:analyzePageForPanelsExperimental(pageno)
 
     if has_panels and has_full_page then
         if self.display_full_page_before then
-            table.insert(final_panels, 1, {
-                x = 0, y = 0, w = 1, h = 1,
-                isFullPage = true
-            })
+            table.insert(final_panels, 1, {x = 0, y = 0, w = 1, h = 1})
         end
 
         if self.display_full_page_after then
-            table.insert(final_panels, {
-                x = 0, y = 0, w = 1, h = 1,
-                isFullPage = true
-            })
+            table.insert(final_panels, {x = 0, y = 0, w = 1, h = 1})
         end
     end
 
