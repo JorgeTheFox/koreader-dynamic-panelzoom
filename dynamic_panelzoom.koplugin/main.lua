@@ -35,6 +35,8 @@ local PanelZoomIntegration = WidgetContainer:extend{
     zoom_margin_percent = 0.05, -- Default 5% extra margin for the free zoom mode
     standard_margin_percent = 0.0, -- Default 0% extra margin for standard panel-by-panel navigation
     show_adjacent_panels = true,   -- Show adjacent content (Smart Fill)
+    display_full_page_before = false,   -- Show full page before showing the first panel
+    display_full_page_after = false,   -- Show full page after showing the last panel
     zoom_initial_scale = 1.2, -- Default 1.2x initial software scale for the free zoom mode
     panelzoom_tap_forward_zone = "auto", -- auto, left, or right
 }
@@ -878,6 +880,18 @@ function PanelZoomIntegration:analyzePageForPanels(pageno)
         
         return a_center_y < b_center_y -- Top to bottom
     end)
+
+    local has_panels = #panels > 0
+    local has_full_page = self.display_full_page_before or self.display_full_page_after
+    if has_panels and has_full_page then
+        if self.display_full_page_before then
+            table.insert(panels, 1, { x = 0, y = 0, w = 1, h = 1})
+        end
+
+        if self.display_full_page_after then
+            table.insert(panels, { x = 0, y = 0, w = 1, h = 1,})
+        end
+    end
     
     return panels
 end
@@ -1088,6 +1102,19 @@ function PanelZoomIntegration:analyzePageForPanelsExperimental(pageno)
     logger.info(string.format("DynamicPanelZoom (Experimental): Final sequence (%d panels, %d rows) for %s reading direction:", #final_panels, #rows, effective_dir))
     for i, p in ipairs(final_panels) do
         logger.info(string.format("  Panel %d: x=%.3f, y=%.3f, w=%.3f, h=%.3f", i, p.x, p.y, p.w, p.h))
+    end
+
+    local has_panels = #final_panels > 0
+    local has_full_page = self.display_full_page_before or self.display_full_page_after
+
+    if has_panels and has_full_page then
+        if self.display_full_page_before then
+            table.insert(final_panels, 1, {x = 0, y = 0, w = 1, h = 1})
+        end
+
+        if self.display_full_page_after then
+            table.insert(final_panels, {x = 0, y = 0, w = 1, h = 1})
+        end
     end
 
     return final_panels
@@ -1539,6 +1566,20 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
                                 callback = function() self.standard_margin_percent = 0.10 end,
                             },
                         }
+                    },
+                    {
+                        text = _("Display full page before first panel"),
+                        checked_func = function() return self.display_full_page_before end,
+                        callback = function()
+                            self.display_full_page_before = not self.display_full_page_before
+                        end,
+                    },
+                    {
+                        text = _("Display full page after last panel"),
+                        checked_func = function() return self.display_full_page_after end,
+                        callback = function()
+                            self.display_full_page_after = not self.display_full_page_after
+                        end,
                     }
                 },
                 separator = true,
