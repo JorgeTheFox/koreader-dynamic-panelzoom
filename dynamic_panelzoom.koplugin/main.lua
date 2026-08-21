@@ -475,7 +475,7 @@ function PanelZoomIntegration:drawPagePartWithSettings(pageno, rect, panel_cente
     scaled_rect:transformByScale(final_scale, final_scale)
     rect.scaled_rect = scaled_rect
 
-    local tile = self.ui.document:renderPage(pageno, rect, final_scale, 0, gamma, true)
+    local tile = self.ui.document:renderPage(pageno, rect, final_scale, 0, gamma, 1.0, true)
     local image = tile.bb
 
     -- 8. POST-PROCESSING
