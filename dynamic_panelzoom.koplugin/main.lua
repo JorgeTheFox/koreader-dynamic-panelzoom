@@ -935,10 +935,10 @@ function PanelZoomIntegration:analyzePageForPanels(pageno)
                 local box_x, box_y, box_w, box_h = boxGetGeometry(box)
                 
                 table.insert(panels, {
-                    x = box_x / target_w,
-                    y = box_y / target_h,
-                    w = box_w / target_w,
-                    h = box_h / target_h,
+                    x = box_x / img_w,
+                    y = box_y / img_h,
+                    w = box_w / img_w,
+                    h = box_h / img_h,
                 })
             end
             -- Note: Memory is handled automatically by _gc_ptr!
@@ -1068,10 +1068,10 @@ function PanelZoomIntegration:analyzePageForPanelsExperimental(pageno)
             -- We don't filter during extraction, we just get all boxes
             local box_x, box_y, box_w, box_h = boxGetGeometry(box)
             table.insert(initial_boxes, {
-                x = box_x / target_w,
-                y = box_y / target_h,
-                w = box_w / target_w,
-                h = box_h / target_h,
+                x = box_x / img_w,
+                y = box_y / img_h,
+                w = box_w / img_w,
+                h = box_h / img_h,
             })
         end
     end
