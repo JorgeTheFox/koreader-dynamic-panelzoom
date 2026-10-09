@@ -38,6 +38,26 @@ No pre-processing, external scripts, or JSON files required—it analyzes the pa
    - **Hold (Long-press)** anywhere while viewing a panel to trigger the **Free Zoom Mode**.
    - Tap the **center** to exit panel view.
 
+## Pre-computed panels (optional)
+If the automatic detection is not good enough for a comic, you can give the plugin the panels yourself. Put a JSON file with the **same name as the comic** next to it (`my_comic.cbz` -> `my_comic.json`). Pages found in the file take priority over detection; pages missing from it still use detection. Toggle in the panel zoom menu: *Experimental features -> Use panel JSON file when available*.
+
+Two formats are accepted:
+- **[panelreader.koplugin](https://github.com/Kaito0/panelreader.koplugin) / `process_manga.py`** (normalized 0..1 coordinates):
+  ```json
+  {"reading_direction": "rtl", "pages": [{"page": 1, "panels": [{"x": 0.1, "y": 0.05, "w": 0.8, "h": 0.4}]}]}
+  ```
+- **[Kumiko](https://github.com/njean42/kumiko) native output** (pixels; the page number is the position in the list).
+
+Panels are shown in the order they appear in the file.
+
+### Visual editor
+[tools/panel_editor.html](tools/panel_editor.html) creates and corrects these JSON files without any command line. Open it in a browser (double click; it runs fully offline, nothing is uploaded and no install is needed; keep `panel_detector.js` next to it).
+1. Open the `.cbz` (or a set of images / a folder) and click **Detectar todas**: panels are pre-detected with the same algorithm the plugin uses.
+2. Fix what is wrong: drag a panel to move it, drag the handles to resize, drag on empty space to draw a new one, `Delete` removes the selected one. Reading order is the number on each panel (*Antes/Depois*, *Ordem automática* or *Definir ordem* and click the panels one by one). `Ctrl+Z` undoes.
+3. **Exportar JSON** and copy `<comic name>.json` next to the comic on your device. Progress is saved in the browser, and *Importar JSON* reloads an existing file (this plugin's format or Kumiko's) for further editing.
+
+`tools/panel_detector.js` is a JavaScript port of `panel_detector.lua`; keep both in sync when changing the detection.
+
 ## Known Issues
 - **Full page mode Only:** If you use the plugin without full page view, you may see some repeated panels.
 

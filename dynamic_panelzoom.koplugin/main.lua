@@ -23,6 +23,7 @@ local USER_SETTINGS = {
     panelzoom_tap_forward_zone = "auto", -- auto, left, or right
     experimental_panel_sorting_enabled = false,
     legacy_panel_detection = false, -- Use the old connected-components detector only
+    use_panel_json = true, -- Use a <comic>.json file next to the comic when it has the page
 }
 
 local PanelZoomIntegration = WidgetContainer:extend{
@@ -824,6 +825,48 @@ function PanelZoomIntegration:importToggleZoomPanels()
     end
 end
 
+-- Pre-computed panels: <comic>.json beside the comic file (same name, .json).
+-- Accepts panelreader.koplugin's format (normalized) and Kumiko's output (pixels).
+-- Returns nil when there is no file or it has nothing for this page.
+function PanelZoomIntegration:getPanelsFromJson(pageno)
+    if not self.use_panel_json then return nil end
+    local doc_path = self.ui.document and self.ui.document.file
+    if not doc_path then return nil end
+
+    local cache = self._panel_json_cache
+    if not cache or cache.path ~= doc_path then
+        cache = { path = doc_path, pages = nil }
+        self._panel_json_cache = cache
+
+        local json_path = (doc_path:gsub("%.[^./\\]+$", "")) .. ".json"
+        local file = io.open(json_path, "r")
+        if file then
+            local content = file:read("*all")
+            file:close()
+            local decoded_ok, data = pcall(json.decode, content)
+            if decoded_ok and data then
+                local pages, err = require("panel_json").parse(data)
+                if pages then
+                    cache.pages = pages
+                    local count = 0
+                    for _ in pairs(pages) do count = count + 1 end
+                    logger.info(string.format("DynamicPanelZoom: Loaded panel data for %d pages from %s", count, json_path))
+                else
+                    logger.warn("DynamicPanelZoom: Ignoring " .. json_path .. ": " .. tostring(err))
+                end
+            else
+                logger.warn("DynamicPanelZoom: Could not parse " .. json_path)
+            end
+        end
+    end
+
+    local panels = cache.pages and cache.pages[pageno]
+    if panels then
+        logger.info(string.format("DynamicPanelZoom: Using %d panels from JSON for page %d", #panels, pageno))
+    end
+    return panels
+end
+
 function PanelZoomIntegration:analyzePageLegacy(pageno)
     if self.experimental_panel_sorting_enabled then
         return self:analyzePageForPanelsExperimental(pageno)
@@ -834,6 +877,9 @@ end
 -- Gutter-based (XY-cut) detection first; the connected-components detector is
 -- kept as a fallback for layouts without straight gutters (pinwheel, etc).
 function PanelZoomIntegration:detectPanels(pageno)
+    local json_panels = self:getPanelsFromJson(pageno)
+    if json_panels then return json_panels end
+
     if self.legacy_panel_detection then
         return self:analyzePageLegacy(pageno)
     end
@@ -1865,6 +1911,17 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
             table.insert(menu_items, 5, {
                 text = _("Experimental features"),
                 sub_item_table = {
+                    {
+                        text = _("Use panel JSON file when available"),
+                        checked_func = function() return self.use_panel_json end,
+                        callback = function()
+                            self.use_panel_json = not self.use_panel_json
+                            logger.info("DynamicPanelZoom: Use panel JSON set to " .. tostring(self.use_panel_json))
+                            self._panel_json_cache = nil
+                            self:invalidatePanelCache()
+                            self:savePluginSettings()
+                        end,
+                    },
                     {
                         text = _("Legacy panel detection (connected components)"),
                         checked_func = function() return self.legacy_panel_detection end,

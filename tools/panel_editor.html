@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor de quadros</title>
+<style>
+  :root {
+    --bg: #f4f4f2; --panel: #ffffff; --text: #1d1d1b; --muted: #6a6a66; --line: #d6d6d0;
+    --accent: #1b6ef3; --accent-text: #ffffff; --ok: #1f9d55; --auto: #1b6ef3; --empty: #9a9a94;
+    --danger: #d63b3b; --stage: #2b2b2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1b1b1a; --panel: #262625; --text: #ecece8; --muted: #a2a29c; --line: #3a3a38;
+      --accent: #5b9bff; --accent-text: #0b1b33; --ok: #43c47a; --auto: #5b9bff; --empty: #77776f;
+      --danger: #ff6b6b; --stage: #121211;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1b1b1a; --panel: #262625; --text: #ecece8; --muted: #a2a29c; --line: #3a3a38;
+    --accent: #5b9bff; --accent-text: #0b1b33; --ok: #43c47a; --auto: #5b9bff; --empty: #77776f;
+    --danger: #ff6b6b; --stage: #121211;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+    padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0 6px 0 0; font-weight: 650; }
+  .group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .sep { width: 1px; align-self: stretch; background: var(--line); }
+  button, select {
+    font: inherit; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  button.active { outline: 2px solid var(--accent); }
+  label.chk { display: inline-flex; gap: 5px; align-items: center; color: var(--muted); cursor: pointer; }
+  main { flex: 1; min-height: 0; display: flex; }
+  aside {
+    width: 190px; flex: none; overflow-y: auto; background: var(--panel);
+    border-right: 1px solid var(--line);
+  }
+  aside .item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 5px 12px; cursor: pointer; border-bottom: 1px solid var(--line);
+  }
+  aside .item:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  aside .item.current { background: color-mix(in srgb, var(--accent) 22%, transparent); font-weight: 600; }
+  aside .item .meta { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--empty); }
+  .dot.auto { background: var(--auto); }
+  .dot.edited { background: var(--ok); }
+  #empty-list { padding: 14px 12px; color: var(--muted); }
+  section.workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #stage { flex: 1; min-height: 0; background: var(--stage); position: relative; }
+  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  #drop-hint {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; color: #cfcfca; padding: 24px; pointer-events: none; font-size: 16px;
+  }
+  #banner {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: var(--accent-text); padding: 6px 14px; border-radius: 999px;
+    font-weight: 600; display: none; pointer-events: none;
+  }
+  footer {
+    background: var(--panel); border-top: 1px solid var(--line); padding: 8px 12px;
+    display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+  }
+  #status { color: var(--muted); flex: 1; min-width: 200px; }
+  #pageinfo { font-variant-numeric: tabular-nums; min-width: 110px; text-align: center; }
+  details.help { background: var(--panel); border-top: 1px solid var(--line); padding: 6px 12px; color: var(--muted); }
+  details.help summary { cursor: pointer; color: var(--text); }
+  details.help ul { margin: 6px 0 2px; padding-left: 18px; }
+  kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 12px; }
+  @media (max-width: 720px) { aside { width: 120px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Editor de quadros</h1>
+  <div class="group">
+    <button id="btn-open" class="primary">Abrir CBZ / imagens</button>
+    <button id="btn-folder">Abrir pasta</button>
+    <button id="btn-import" disabled>Importar JSON</button>
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <label for="dir">Leitura</label>
+    <select id="dir"><option value="ltr">Esquerda → direita</option><option value="rtl">Direita → esquerda (mangá)</option></select>
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <button id="btn-detect" disabled>Detectar esta página</button>
+    <button id="btn-detect-all" disabled>Detectar todas</button>
+    <label class="chk"><input type="checkbox" id="chk-overwrite"> sobrescrever editadas</label>
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <button id="btn-export" class="primary" disabled>Exportar JSON</button>
+  </div>
+  <input type="file" id="file-main" accept=".cbz,.zip,.jpg,.jpeg,.png,.webp,.gif,.bmp,.avif,image/*" multiple hidden>
+  <input type="file" id="file-folder" webkitdirectory hidden>
+  <input type="file" id="file-json" accept=".json,application/json" hidden>
+</header>
+
+<main>
+  <aside id="list"><div id="empty-list">Nenhuma página carregada.</div></aside>
+  <section class="workspace">
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+      <div id="drop-hint">Arraste um arquivo .cbz (ou várias imagens) para cá,<br>ou use “Abrir CBZ / imagens”.</div>
+      <div id="banner"></div>
+    </div>
+    <footer>
+      <div class="group">
+        <button id="btn-prev" disabled title="Página anterior (PageUp)">◀</button>
+        <span id="pageinfo">—</span>
+        <button id="btn-next" disabled title="Próxima página (PageDown)">▶</button>
+      </div>
+      <div class="sep"></div>
+      <div class="group">
+        <button id="btn-earlier" disabled title="Passa o quadro selecionado para antes ( [ )">Antes</button>
+        <button id="btn-later" disabled title="Passa o quadro selecionado para depois ( ] )">Depois</button>
+        <button id="btn-auto-order" disabled title="Reordena por linhas, segundo a direção de leitura">Ordem automática</button>
+        <button id="btn-order" disabled title="Clique nos quadros na ordem de leitura">Definir ordem</button>
+      </div>
+      <div class="sep"></div>
+      <div class="group">
+        <button id="btn-delete" class="danger" disabled title="Delete">Apagar quadro</button>
+        <button id="btn-clear" class="danger" disabled>Limpar página</button>
+        <button id="btn-undo" disabled title="Ctrl+Z">Desfazer</button>
+      </div>
+      <div id="status">Pronto.</div>
+    </footer>
+    <details class="help">
+      <summary>Como usar</summary>
+      <ul>
+        <li>Abra o <b>.cbz</b> (ou as imagens) e clique em <b>Detectar todas</b>: os quadros vêm pré-detectados com o mesmo algoritmo do plugin.</li>
+        <li>Arraste um quadro para movê-lo, as alças para redimensionar, ou arraste no vazio para <b>desenhar</b> um novo. <kbd>Delete</kbd> apaga o selecionado; setas ajustam de leve (com <kbd>Shift</kbd>, mais).</li>
+        <li>A <b>ordem</b> é o número no canto de cada quadro: use Antes/Depois (<kbd>[</kbd> <kbd>]</kbd>), Ordem automática, ou <b>Definir ordem</b> e clique nos quadros um a um.</li>
+        <li><kbd>PageUp</kbd>/<kbd>PageDown</kbd> mudam de página. <kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz. O progresso fica salvo neste navegador.</li>
+        <li><b>Exportar JSON</b> gera <code>nome_do_quadrinho.json</code>: copie para a mesma pasta do quadrinho no leitor. Páginas sem quadros no arquivo usam a detecção automática do plugin.</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<script src="panel_detector.js"></script>
+<script>
+"use strict";
+
+/* ---------- state ---------- */
+const $ = (id) => document.getElementById(id);
+const canvas = $("canvas"), ctx = canvas.getContext("2d");
+const MAX_DETECT_DIM = 640;
+const HANDLE = 7;
+
+const S = {
+  pages: [],          // {name, getBlob, w, h, panels:[{x,y,w,h}], state:'empty'|'auto'|'edited', history:[]}
+  cur: -1,
+  sel: -1,
+  dir: "ltr",
+  baseName: "quadrinho",
+  storageKey: null,
+  bitmap: null,       // current page bitmap
+  bitmapIndex: -1,
+  bitmapCache: new Map(),
+  drag: null,
+  orderMode: null,    // {picked:[]}
+  detecting: false,
+  cancelDetect: false,
+};
+
+/* ---------- helpers ---------- */
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const round4 = (v) => Math.round(v * 10000) / 10000;
+function setStatus(t) { $("status").textContent = t; }
+function curPage() { return S.pages[S.cur]; }
+
+function naturalCompare(a, b) {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
+function mimeFor(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  return { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp",
+           gif: "image/gif", bmp: "image/bmp", avif: "image/avif" }[ext] || "application/octet-stream";
+}
+const isImageName = (n) => /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(n)
+  && !/(^|\/)(__MACOSX|\.)/.test(n) && !/(^|\/)\.[^/]*$/.test(n);
+
+/* ---------- ZIP (CBZ) reader: central directory + DecompressionStream ---------- */
+async function readZip(file) {
+  const buf = await file.arrayBuffer();
+  const dv = new DataView(buf);
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Não parece um arquivo ZIP/CBZ válido.");
+  const count = dv.getUint16(eocd + 10, true);
+  const cdOff = dv.getUint32(eocd + 16, true);
+  if (cdOff === 0xffffffff || count === 0xffff) throw new Error("ZIP64 (arquivos enormes) não é suportado.");
+
+  const entries = [];
+  let p = cdOff;
+  const dec = new TextDecoder("utf-8");
+  for (let i = 0; i < count; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const csize = dv.getUint32(p + 20, true);
+    const nlen = dv.getUint16(p + 28, true);
+    const elen = dv.getUint16(p + 30, true);
+    const clen = dv.getUint16(p + 32, true);
+    const off = dv.getUint32(p + 42, true);
+    const name = dec.decode(new Uint8Array(buf, p + 46, nlen));
+    entries.push({ name, method, csize, off });
+    p += 46 + nlen + elen + clen;
+  }
+
+  return entries.filter((e) => isImageName(e.name)).map((e) => ({
+    name: e.name,
+    async getBlob() {
+      const nlen = dv.getUint16(e.off + 26, true), elen = dv.getUint16(e.off + 28, true);
+      const start = e.off + 30 + nlen + elen;
+      const slice = new Blob([buf.slice(start, start + e.csize)]);
+      if (e.method === 0) return new Blob([slice], { type: mimeFor(e.name) });
+      if (e.method !== 8) throw new Error("Método de compressão não suportado em " + e.name);
+      if (typeof DecompressionStream === "undefined") throw new Error("Este navegador não tem DecompressionStream. Use um Chrome/Edge/Firefox recente.");
+      const out = await new Response(slice.stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob();
+      return new Blob([out], { type: mimeFor(e.name) });
+    },
+  }));
+}
+
+/* ---------- loading ---------- */
+async function openFiles(files, folderName) {
+  files = Array.from(files);
+  if (!files.length) return;
+  try {
+    let sources = [];
+    let base = "quadrinho";
+    const zip = files.find((f) => /\.(cbz|zip)$/i.test(f.name));
+    if (zip) {
+      setStatus("Lendo " + zip.name + "…");
+      sources = await readZip(zip);
+      base = zip.name.replace(/\.[^.]+$/, "");
+    } else if (files.some((f) => /\.(cbr|rar|7z|cb7)$/i.test(f.name))) {
+      throw new Error("CBR/RAR/7z não são suportados aqui. Converta para CBZ (ZIP) ou abra as imagens.");
+    } else {
+      sources = files.filter((f) => isImageName(f.name)).map((f) => ({
+        name: f.webkitRelativePath || f.name, getBlob: async () => f,
+      }));
+      base = folderName || (files[0].name.replace(/\.[^.]+$/, "") || "quadrinho");
+      if (folderName === undefined && files.length > 1) base = "quadrinho";
+    }
+    if (!sources.length) throw new Error("Nenhuma imagem encontrada.");
+    sources.sort((a, b) => naturalCompare(a.name, b.name));
+
+    S.pages = sources.map((s) => ({ name: s.name, getBlob: s.getBlob, w: 0, h: 0, panels: [], state: "empty", history: [] }));
+    S.cur = -1; S.sel = -1; S.baseName = base;
+    S.bitmapCache.forEach((b) => b.close && b.close()); S.bitmapCache.clear();
+    S.bitmap = null; S.bitmapIndex = -1;
+    S.storageKey = "pzed:" + base + ":" + (zip ? zip.size : 0) + ":" + S.pages.length;
+    const restored = restoreProgress();
+
+    buildList();
+    $("drop-hint").style.display = "none";
+    for (const id of ["btn-detect", "btn-detect-all", "btn-export", "btn-import"]) $(id).disabled = false;
+    await goTo(0);
+    setStatus(S.pages.length + " páginas carregadas" + (restored ? " (progresso anterior restaurado)." : ". Use “Detectar todas” para começar."));
+  } catch (err) {
+    console.error(err);
+    setStatus("Erro: " + err.message);
+    alert(err.message);
+  }
+}
+
+async function getBitmap(i) {
+  if (S.bitmapCache.has(i)) {
+    const b = S.bitmapCache.get(i); S.bitmapCache.delete(i); S.bitmapCache.set(i, b); return b;
+  }
+  const blob = await S.pages[i].getBlob();
+  const bmp = await createImageBitmap(blob);
+  S.pages[i].w = bmp.width; S.pages[i].h = bmp.height;
+  S.bitmapCache.set(i, bmp);
+  while (S.bitmapCache.size > 4) {
+    const oldest = S.bitmapCache.keys().next().value;
+    const ob = S.bitmapCache.get(oldest); S.bitmapCache.delete(oldest);
+    if (ob.close) ob.close();
+  }
+  return bmp;
+}
+
+async function goTo(i) {
+  if (i < 0 || i >= S.pages.length) return;
+  cancelOrderMode();
+  S.cur = i; S.sel = -1; S.drag = null;
+  S.bitmap = null; draw();
+  try {
+    const bmp = await getBitmap(i);
+    if (S.cur !== i) return;
+    S.bitmap = bmp; S.bitmapIndex = i;
+  } catch (err) {
+    setStatus("Não consegui abrir a página " + (i + 1) + ": " + err.message);
+  }
+  updateChrome(); markCurrentInList(); draw();
+}
+
+/* ---------- page list ---------- */
+function buildList() {
+  const list = $("list");
+  list.innerHTML = "";
+  S.pages.forEach((pg, i) => {
+    const el = document.createElement("div");
+    el.className = "item"; el.dataset.i = i;
+    el.innerHTML = '<span class="num"></span><span class="meta"><span class="count"></span><span class="dot"></span></span>';
+    el.addEventListener("click", () => goTo(i));
+    list.appendChild(el);
+    refreshListItem(i);
+  });
+}
+function refreshListItem(i) {
+  const el = $("list").children[i];
+  if (!el) return;
+  const pg = S.pages[i];
+  el.querySelector(".num").textContent = "Página " + (i + 1);
+  el.querySelector(".count").textContent = pg.panels.length ? pg.panels.length + " q." : "—";
+  el.querySelector(".dot").className = "dot " + (pg.state === "empty" ? "" : pg.state);
+  el.title = pg.name;
+}
+function markCurrentInList() {
+  for (const el of $("list").children) el.classList.toggle("current", Number(el.dataset.i) === S.cur);
+  const el = $("list").children[S.cur];
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+}
+
+/* ---------- chrome (buttons/labels) ---------- */
+function updateChrome() {
+  const has = S.cur >= 0;
+  $("pageinfo").textContent = has ? "Página " + (S.cur + 1) + " / " + S.pages.length : "—";
+  $("btn-prev").disabled = !has || S.cur === 0;
+  $("btn-next").disabled = !has || S.cur === S.pages.length - 1;
+  const pg = curPage();
+  const n = has ? pg.panels.length : 0;
+  $("btn-clear").disabled = !has || n === 0;
+  $("btn-auto-order").disabled = !has || n < 2;
+  $("btn-order").disabled = !has || n < 2;
+  const sel = has && S.sel >= 0 && S.sel < n;
+  $("btn-delete").disabled = !sel;
+  $("btn-earlier").disabled = !sel || S.sel === 0;
+  $("btn-later").disabled = !sel || S.sel === n - 1;
+  $("btn-undo").disabled = !has || pg.history.length === 0;
+  $("btn-order").classList.toggle("active", !!S.orderMode);
+}
+
+/* ---------- history / persistence ---------- */
+function snapshot(pg) { return JSON.stringify([pg.state, pg.panels]); }
+function pushHistory(pg, snap) {
+  pg.history.push(snap || snapshot(pg));
+  if (pg.history.length > 60) pg.history.shift();
+}
+function undo() {
+  const pg = curPage();
+  if (!pg || !pg.history.length) return;
+  const [state, panels] = JSON.parse(pg.history.pop());
+  pg.state = state; pg.panels = panels; S.sel = -1;
+  afterChange(false);
+}
+let saveTimer = null;
+function afterChange(markEdited = true) {
+  const pg = curPage();
+  if (markEdited && pg && pg.state !== "edited") pg.state = "edited";
+  if (S.sel >= (pg ? pg.panels.length : 0)) S.sel = -1;
+  refreshListItem(S.cur); updateChrome(); draw();
+  clearTimeout(saveTimer); saveTimer = setTimeout(saveProgress, 400);
+}
+function saveProgress() {
+  if (!S.storageKey) return;
+  try {
+    const data = { dir: S.dir, pages: S.pages.map((p) => ({ s: p.state, p: p.panels.map((q) => [round4(q.x), round4(q.y), round4(q.w), round4(q.h)]) })) };
+    localStorage.setItem(S.storageKey, JSON.stringify(data));
+  } catch (e) { /* storage unavailable: the export still works */ }
+}
+function restoreProgress() {
+  try {
+    const raw = localStorage.getItem(S.storageKey);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.pages) || data.pages.length !== S.pages.length) return false;
+    S.dir = data.dir === "rtl" ? "rtl" : "ltr"; $("dir").value = S.dir;
+    data.pages.forEach((d, i) => {
+      S.pages[i].state = d.s === "edited" || d.s === "auto" ? d.s : "empty";
+      S.pages[i].panels = (d.p || []).map((q) => ({ x: q[0], y: q[1], w: q[2], h: q[3] }));
+    });
+    return true;
+  } catch (e) { return false; }
+}
+
+/* ---------- detection ---------- */
+async function detectPage(i) {
+  const bmp = await getBitmap(i);
+  const scale = Math.min(1, MAX_DETECT_DIM / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+  const oc = document.createElement("canvas"); oc.width = w; oc.height = h;
+  const octx = oc.getContext("2d", { willReadFrequently: true });
+  octx.fillStyle = "#fff"; octx.fillRect(0, 0, w, h);   // transparent PNGs behave as white paper
+  octx.drawImage(bmp, 0, 0, w, h);
+  const px = octx.getImageData(0, 0, w, h).data;
+  const n = w * h, r = new Uint8Array(n), g = new Uint8Array(n), b = new Uint8Array(n);
+  for (let k = 0; k < n; k++) { r[k] = px[k * 4]; g[k] = px[k * 4 + 1]; b[k] = px[k * 4 + 2]; }
+  return PanelDetector.detect({ r, g, b }, w, h, S.dir).map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h }));
+}
+
+async function detectCurrent() {
+  const pg = curPage(); if (!pg) return;
+  setStatus("Detectando…");
+  pushHistory(pg);
+  pg.panels = await detectPage(S.cur); pg.state = "auto"; S.sel = -1;
+  afterChange(false);
+  setStatus(pg.panels.length + " quadros detectados na página " + (S.cur + 1) + ".");
+}
+
+async function detectAll() {
+  if (S.detecting) { S.cancelDetect = true; return; }
+  S.detecting = true; S.cancelDetect = false;
+  const btn = $("btn-detect-all"); btn.textContent = "Cancelar";
+  const overwrite = $("chk-overwrite").checked;
+  let done = 0, skipped = 0;
+  try {
+    for (let i = 0; i < S.pages.length; i++) {
+      if (S.cancelDetect) break;
+      const pg = S.pages[i];
+      if (pg.state === "edited" && !overwrite) { skipped++; continue; }
+      setStatus("Detectando " + (i + 1) + " / " + S.pages.length + "…");
+      pushHistory(pg);
+      pg.panels = await detectPage(i); pg.state = "auto";
+      refreshListItem(i); done++;
+      if (i === S.cur) { S.sel = -1; updateChrome(); draw(); }
+      await new Promise((res) => setTimeout(res, 0));
+    }
+  } catch (err) {
+    setStatus("Erro na detecção: " + err.message);
+  } finally {
+    S.detecting = false; btn.textContent = "Detectar todas";
+    saveProgress(); updateChrome(); draw();
+  }
+  setStatus((S.cancelDetect ? "Cancelado. " : "Pronto. ") + done + " páginas detectadas" + (skipped ? ", " + skipped + " editadas mantidas." : "."));
+}
+
+/* ---------- order tools ---------- */
+function autoOrder(panels, dir) {
+  const ps = panels.slice().sort((a, b) => a.y - b.y);
+  const rows = [];
+  for (const p of ps) {
+    let placed = false;
+    for (const row of rows) {
+      const top = Math.min(...row.map((q) => q.y)), bot = Math.max(...row.map((q) => q.y + q.h));
+      const overlap = Math.min(bot, p.y + p.h) - Math.max(top, p.y);
+      if (overlap > 0.5 * Math.min(p.h, bot - top)) { row.push(p); placed = true; break; }
+    }
+    if (!placed) rows.push([p]);
+  }
+  rows.sort((a, b) => Math.min(...a.map((q) => q.y)) - Math.min(...b.map((q) => q.y)));
+  const out = [];
+  for (const row of rows) {
+    row.sort((a, b) => (dir === "rtl" ? (b.x + b.w) - (a.x + a.w) : a.x - b.x));
+    out.push(...row);
+  }
+  return out;
+}
+function moveSelected(delta) {
+  const pg = curPage(); if (!pg || S.sel < 0) return;
+  const j = S.sel + delta;
+  if (j < 0 || j >= pg.panels.length) return;
+  pushHistory(pg);
+  [pg.panels[S.sel], pg.panels[j]] = [pg.panels[j], pg.panels[S.sel]];
+  S.sel = j; afterChange();
+}
+function startOrderMode() {
+  const pg = curPage(); if (!pg || pg.panels.length < 2) return;
+  S.orderMode = { picked: [] }; S.sel = -1;
+  showBanner("Clique nos quadros na ordem de leitura — Esc cancela");
+  updateChrome(); draw();
+}
+function cancelOrderMode() {
+  if (!S.orderMode) return;
+  S.orderMode = null; showBanner(""); updateChrome(); draw();
+}
+function showBanner(t) { const b = $("banner"); b.textContent = t; b.style.display = t ? "block" : "none"; }
+
+/* ---------- geometry & drawing ---------- */
+const view = { ox: 0, oy: 0, w: 0, h: 0, dpr: 1 };
+
+function layout() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  view.dpr = dpr;
+  const pad = 12;
+  const bw = S.bitmap ? S.bitmap.width : 1, bh = S.bitmap ? S.bitmap.height : 1;
+  const s = Math.min((rect.width - pad * 2) / bw, (rect.height - pad * 2) / bh);
+  view.w = Math.max(1, bw * s); view.h = Math.max(1, bh * s);
+  view.ox = (rect.width - view.w) / 2; view.oy = (rect.height - view.h) / 2;
+}
+
+function rectPx(p) { return { x: view.ox + p.x * view.w, y: view.oy + p.y * view.h, w: p.w * view.w, h: p.h * view.h }; }
+
+function handlePoints(r) {
+  const cx = r.x + r.w / 2, cy = r.y + r.h / 2, x2 = r.x + r.w, y2 = r.y + r.h;
+  return { nw: [r.x, r.y], n: [cx, r.y], ne: [x2, r.y], e: [x2, cy], se: [x2, y2], s: [cx, y2], sw: [r.x, y2], w: [r.x, cy] };
+}
+
+function cssColor(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function draw() {
+  layout();
+  const c = ctx;
+  c.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  c.clearRect(0, 0, canvas.width, canvas.height);
+  if (!S.bitmap || S.bitmapIndex !== S.cur) return;
+  c.imageSmoothingQuality = "high";
+  c.drawImage(S.bitmap, view.ox, view.oy, view.w, view.h);
+
+  const pg = curPage();
+  const accent = cssColor("--accent") || "#1b6ef3";
+  const order = S.orderMode ? S.orderMode.picked : null;
+  pg.panels.forEach((p, i) => {
+    const r = rectPx(p);
+    const selected = i === S.sel;
+    const pickedAt = order ? order.indexOf(i) : -1;
+    c.fillStyle = selected ? "rgba(27,110,243,0.20)" : "rgba(27,110,243,0.10)";
+    c.fillRect(r.x, r.y, r.w, r.h);
+    c.lineWidth = selected ? 3 : 2;
+    c.strokeStyle = pickedAt >= 0 ? "#1f9d55" : (selected ? "#ff8a00" : accent);
+    c.strokeRect(r.x, r.y, r.w, r.h);
+
+    const label = String(order ? (pickedAt >= 0 ? pickedAt + 1 : "?") : i + 1);
+    c.font = "bold 14px system-ui, sans-serif";
+    const tw = c.measureText(label).width + 12;
+    c.fillStyle = pickedAt >= 0 ? "#1f9d55" : (selected ? "#ff8a00" : accent);
+    c.fillRect(r.x, r.y, tw, 22);
+    c.fillStyle = "#fff"; c.textBaseline = "middle"; c.fillText(label, r.x + 6, r.y + 11.5);
+
+    if (selected && !order) {
+      c.fillStyle = "#fff"; c.strokeStyle = "#ff8a00"; c.lineWidth = 2;
+      for (const [hx, hy] of Object.values(handlePoints(r))) {
+        c.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+        c.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+      }
+    }
+  });
+
+  if (S.drag && S.drag.type === "draw" && S.drag.rect) {
+    const r = rectPx(S.drag.rect);
+    c.setLineDash([6, 4]); c.strokeStyle = "#ff8a00"; c.lineWidth = 2;
+    c.strokeRect(r.x, r.y, r.w, r.h); c.setLineDash([]);
+  }
+}
+
+/* ---------- pointer interaction ---------- */
+function pointerPos(ev) {
+  const rect = canvas.getBoundingClientRect();
+  const px = ev.clientX - rect.left, py = ev.clientY - rect.top;
+  return { px, py, nx: (px - view.ox) / view.w, ny: (py - view.oy) / view.h };
+}
+function hitHandle(px, py, p) {
+  const pts = handlePoints(rectPx(p));
+  for (const [name, [hx, hy]] of Object.entries(pts)) {
+    if (Math.abs(px - hx) <= HANDLE + 2 && Math.abs(py - hy) <= HANDLE + 2) return name;
+  }
+  return null;
+}
+function hitPanel(nx, ny) {
+  const pg = curPage(); let best = -1, bestArea = Infinity;
+  pg.panels.forEach((p, i) => {
+    if (nx >= p.x && nx <= p.x + p.w && ny >= p.y && ny <= p.y + p.h) {
+      const a = p.w * p.h;
+      if (a < bestArea || (i === S.sel && a <= bestArea * 1.0001)) { best = i; bestArea = a; }
+    }
+  });
+  return best;
+}
+const CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
+
+canvas.addEventListener("pointerdown", (ev) => {
+  if (S.cur < 0 || !S.bitmap || S.bitmapIndex !== S.cur) return;
+  canvas.setPointerCapture(ev.pointerId);
+  const pg = curPage(), pos = pointerPos(ev);
+
+  if (S.orderMode) {
+    const i = hitPanel(pos.nx, pos.ny);
+    if (i >= 0 && !S.orderMode.picked.includes(i)) {
+      S.orderMode.picked.push(i);
+      if (S.orderMode.picked.length === pg.panels.length) {
+        pushHistory(pg);
+        pg.panels = S.orderMode.picked.map((k) => pg.panels[k]);
+        S.orderMode = null; showBanner(""); S.sel = -1; afterChange();
+        setStatus("Ordem atualizada.");
+        return;
+      }
+      draw();
+    }
+    return;
+  }
+
+  if (S.sel >= 0 && pg.panels[S.sel]) {
+    const h = hitHandle(pos.px, pos.py, pg.panels[S.sel]);
+    if (h) {
+      S.drag = { type: "resize", h, orig: { ...pg.panels[S.sel] }, snap: snapshot(pg), moved: false };
+      return;
+    }
+  }
+  const i = hitPanel(pos.nx, pos.ny);
+  if (i >= 0) {
+    S.sel = i; updateChrome();
+    S.drag = { type: "move", start: pos, orig: { ...pg.panels[i] }, snap: snapshot(pg), moved: false };
+    draw();
+  } else {
+    S.sel = -1; updateChrome();
+    const sx = clamp(pos.nx, 0, 1), sy = clamp(pos.ny, 0, 1);
+    S.drag = { type: "draw", sx, sy, rect: null };
+    draw();
+  }
+});
+
+canvas.addEventListener("pointermove", (ev) => {
+  if (S.cur < 0) return;
+  const pos = pointerPos(ev), pg = curPage();
+  const d = S.drag;
+  if (!d) {
+    let cur = "default";
+    if (S.orderMode) cur = hitPanel(pos.nx, pos.ny) >= 0 ? "pointer" : "default";
+    else {
+      if (S.sel >= 0 && pg.panels[S.sel]) {
+        const h = hitHandle(pos.px, pos.py, pg.panels[S.sel]);
+        if (h) cur = CURSORS[h];
+      }
+      if (cur === "default") cur = hitPanel(pos.nx, pos.ny) >= 0 ? "move" : "crosshair";
+    }
+    canvas.style.cursor = cur;
+    return;
+  }
+  if (d.type === "move") {
+    const p = pg.panels[S.sel]; if (!p) return;
+    const dx = (pos.px - d.start.px) / view.w, dy = (pos.py - d.start.py) / view.h;
+    p.x = clamp(d.orig.x + dx, 0, 1 - p.w); p.y = clamp(d.orig.y + dy, 0, 1 - p.h);
+    d.moved = true;
+  } else if (d.type === "resize") {
+    const p = pg.panels[S.sel]; if (!p) return;
+    let l = d.orig.x, t = d.orig.y, r = d.orig.x + d.orig.w, b = d.orig.y + d.orig.h;
+    const nx = clamp(pos.nx, 0, 1), ny = clamp(pos.ny, 0, 1);
+    if (d.h.includes("w")) l = nx;
+    if (d.h.includes("e")) r = nx;
+    if (d.h.includes("n")) t = ny;
+    if (d.h.includes("s")) b = ny;
+    const nl = Math.min(l, r), nr = Math.max(l, r), nt = Math.min(t, b), nb = Math.max(t, b);
+    p.x = nl; p.y = nt; p.w = Math.max(0.01, nr - nl); p.h = Math.max(0.01, nb - nt);
+    d.moved = true;
+  } else if (d.type === "draw") {
+    const nx = clamp(pos.nx, 0, 1), ny = clamp(pos.ny, 0, 1);
+    d.rect = { x: Math.min(d.sx, nx), y: Math.min(d.sy, ny), w: Math.abs(nx - d.sx), h: Math.abs(ny - d.sy) };
+  }
+  draw();
+});
+
+function endDrag(ev) {
+  const d = S.drag; if (!d) return;
+  S.drag = null;
+  const pg = curPage();
+  if (d.type === "draw") {
+    if (d.rect && d.rect.w >= 0.015 && d.rect.h >= 0.015) {
+      pushHistory(pg);
+      pg.panels.push({ x: d.rect.x, y: d.rect.y, w: d.rect.w, h: d.rect.h });
+      S.sel = pg.panels.length - 1; afterChange();
+      setStatus("Quadro adicionado no fim da ordem; use Antes/Depois ou Definir ordem.");
+      return;
+    }
+    draw(); return;
+  }
+  if (d.moved) { pushHistory(pg, d.snap); afterChange(); } else { updateChrome(); draw(); }
+}
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+
+/* ---------- JSON import / export ---------- */
+function parsePanelJson(data) {
+  // Accepts the plugin/panelreader layout and Kumiko's native output (same rules as panel_json.lua).
+  const list = data && Array.isArray(data.pages) ? data.pages : (Array.isArray(data) ? data : null);
+  if (!list) throw new Error("Formato de JSON não reconhecido.");
+  const num = (v) => { v = Number(v); return Number.isFinite(v) ? v : null; };
+  const pages = new Map();
+  list.forEach((entry, index) => {
+    if (!entry || !Array.isArray(entry.panels)) return;
+    const pageNo = num(entry.page) ?? index + 1;
+    const pw = entry.size ? num(entry.size[0]) : null, ph = entry.size ? num(entry.size[1]) : null;
+    const out = [];
+    for (const raw of entry.panels) {
+      let x, y, w, h;
+      if (raw && raw.x !== undefined) { x = num(raw.x); y = num(raw.y); w = num(raw.w ?? raw.width); h = num(raw.h ?? raw.height); }
+      else if (Array.isArray(raw)) { [x, y, w, h] = raw.map(num); }
+      if ([x, y, w, h].some((v) => v === null || v === undefined) || w <= 0 || h <= 0) continue;
+      if (x + w > 1.5 || y + h > 1.5) {
+        if (!(pw > 0 && ph > 0)) continue;
+        x /= pw; w /= pw; y /= ph; h /= ph;
+      }
+      const x1 = Math.min(1, x + w), y1 = Math.min(1, y + h);
+      x = Math.max(0, x); y = Math.max(0, y);
+      if (x1 - x > 0.01 && y1 - y > 0.01) out.push({ x, y, w: x1 - x, h: y1 - y });
+    }
+    if (out.length) pages.set(pageNo, out);
+  });
+  if (!pages.size) throw new Error("O JSON não tem quadros utilizáveis.");
+  return { pages, direction: data && (data.reading_direction === "rtl" || data.reading_direction === "ltr") ? data.reading_direction : null };
+}
+
+async function importJson(file) {
+  try {
+    const { pages, direction } = parsePanelJson(JSON.parse(await file.text()));
+    let n = 0;
+    for (const [no, panels] of pages) {
+      const pg = S.pages[no - 1]; if (!pg) continue;
+      pushHistory(pg); pg.panels = panels; pg.state = "edited"; refreshListItem(no - 1); n++;
+    }
+    if (direction) { S.dir = direction; $("dir").value = direction; }
+    S.sel = -1; afterChange(false); saveProgress();
+    setStatus("JSON importado: " + n + " páginas.");
+  } catch (err) {
+    setStatus("Erro ao importar: " + err.message); alert("Erro ao importar: " + err.message);
+  }
+}
+
+function exportJson() {
+  const pages = [];
+  S.pages.forEach((pg, i) => {
+    if (!pg.panels.length) return;
+    pages.push({ page: i + 1, panels: pg.panels.map((q) => ({ x: round4(q.x), y: round4(q.y), w: round4(q.w), h: round4(q.h) })) });
+  });
+  if (!pages.length) { setStatus("Nada para exportar: nenhuma página tem quadros."); return; }
+  const out = { reading_direction: S.dir, total_pages: S.pages.length, pages };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = S.baseName + ".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  const empty = S.pages.length - pages.length;
+  setStatus("Exportado " + S.baseName + ".json (" + pages.length + " páginas" + (empty ? "; " + empty + " sem quadros usarão a detecção automática" : "") + ").");
+}
+
+/* ---------- wiring ---------- */
+$("btn-open").addEventListener("click", () => $("file-main").click());
+$("btn-folder").addEventListener("click", () => $("file-folder").click());
+$("btn-import").addEventListener("click", () => $("file-json").click());
+$("file-main").addEventListener("change", (e) => { openFiles(e.target.files); e.target.value = ""; });
+$("file-folder").addEventListener("change", (e) => {
+  const files = Array.from(e.target.files);
+  const folder = files[0] && files[0].webkitRelativePath ? files[0].webkitRelativePath.split("/")[0] : "quadrinho";
+  openFiles(files, folder); e.target.value = "";
+});
+$("file-json").addEventListener("change", (e) => { if (e.target.files[0]) importJson(e.target.files[0]); e.target.value = ""; });
+$("btn-detect").addEventListener("click", () => detectCurrent());
+$("btn-detect-all").addEventListener("click", () => detectAll());
+$("btn-export").addEventListener("click", exportJson);
+$("btn-prev").addEventListener("click", () => goTo(S.cur - 1));
+$("btn-next").addEventListener("click", () => goTo(S.cur + 1));
+$("btn-earlier").addEventListener("click", () => moveSelected(-1));
+$("btn-later").addEventListener("click", () => moveSelected(1));
+$("btn-undo").addEventListener("click", undo);
+$("btn-order").addEventListener("click", () => (S.orderMode ? cancelOrderMode() : startOrderMode()));
+$("btn-auto-order").addEventListener("click", () => {
+  const pg = curPage(); if (!pg) return;
+  pushHistory(pg); pg.panels = autoOrder(pg.panels, S.dir); S.sel = -1; afterChange();
+  setStatus("Quadros reordenados por linhas (" + (S.dir === "rtl" ? "direita → esquerda" : "esquerda → direita") + ").");
+});
+$("btn-delete").addEventListener("click", deleteSelected);
+$("btn-clear").addEventListener("click", () => {
+  const pg = curPage(); if (!pg || !pg.panels.length) return;
+  pushHistory(pg); pg.panels = []; S.sel = -1; afterChange();
+});
+$("dir").addEventListener("change", () => {
+  S.dir = $("dir").value;
+  const autoPages = S.pages.filter((p) => p.state === "auto").length;
+  setStatus(autoPages ? "Direção alterada. Use “Detectar todas” para reordenar as páginas automáticas (as editadas ficam como estão)." : "Direção alterada.");
+  saveProgress();
+});
+
+function deleteSelected() {
+  const pg = curPage(); if (!pg || S.sel < 0 || !pg.panels[S.sel]) return;
+  pushHistory(pg); pg.panels.splice(S.sel, 1); S.sel = -1; afterChange();
+}
+
+window.addEventListener("keydown", (ev) => {
+  const t = ev.target && ev.target.tagName;
+  if (t === "SELECT" || t === "INPUT") return;
+  const pg = curPage();
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") { ev.preventDefault(); undo(); return; }
+  if (ev.key === "Escape") { cancelOrderMode(); S.sel = -1; updateChrome(); draw(); return; }
+  if (!pg) return;
+  if (ev.key === "PageDown") { ev.preventDefault(); goTo(S.cur + 1); return; }
+  if (ev.key === "PageUp") { ev.preventDefault(); goTo(S.cur - 1); return; }
+  if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); deleteSelected(); return; }
+  if (ev.key === "[") { moveSelected(-1); return; }
+  if (ev.key === "]") { moveSelected(1); return; }
+  const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
+  if (arrows) {
+    ev.preventDefault();
+    if (S.sel >= 0 && pg.panels[S.sel]) {
+      const step = ev.shiftKey ? 0.01 : 0.002, p = pg.panels[S.sel];
+      pushHistory(pg);
+      p.x = clamp(p.x + arrows[0] * step, 0, 1 - p.w); p.y = clamp(p.y + arrows[1] * step, 0, 1 - p.h);
+      afterChange();
+    } else if (arrows[0]) {
+      goTo(S.cur + arrows[0]);
+    }
+  }
+});
+
+["dragenter", "dragover"].forEach((n) => window.addEventListener(n, (e) => e.preventDefault()));
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files.length) {
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 1 && /\.json$/i.test(files[0].name) && S.pages.length) importJson(files[0]);
+    else openFiles(files);
+  }
+});
+
+new ResizeObserver(draw).observe($("stage"));
+window.addEventListener("resize", draw);
+window.addEventListener("beforeunload", saveProgress);
+updateChrome(); draw();
+
+// Test hook (used by the automated checks; harmless otherwise).
+window.PZ = { S, readZip, openFiles, detectAll, exportJson, parsePanelJson, autoOrder };
+</script>
+</body>
+</html>
