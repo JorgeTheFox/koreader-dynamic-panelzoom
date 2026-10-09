@@ -149,6 +149,7 @@ function PanelViewer:calculateDisplayRect()
 
     local img_w = self._image_bb:getWidth()
     local img_h = self._image_bb:getHeight()
+    self._scaled_image_bb = self._image_bb
 
     local function round(x)
         return math.floor(x + 0.5)
@@ -162,7 +163,6 @@ function PanelViewer:calculateDisplayRect()
             w = img_w,
             h = img_h
         }
-        self._scaled_image_bb = self._image_bb
         return
     end
 

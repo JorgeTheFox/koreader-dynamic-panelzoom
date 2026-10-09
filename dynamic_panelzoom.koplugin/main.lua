@@ -22,6 +22,8 @@ local USER_SETTINGS = {
     zoom_initial_scale = 1.2, -- Default 1.2x initial software scale for the free zoom mode
     panelzoom_tap_forward_zone = "auto", -- auto, left, or right
     experimental_panel_sorting_enabled = false,
+    legacy_panel_detection = false, -- Use the old connected-components detector only
+    use_panel_json = true, -- Use a <comic>.json file next to the comic when it has the page
 }
 
 local PanelZoomIntegration = WidgetContainer:extend{
@@ -811,12 +813,8 @@ function PanelZoomIntegration:importToggleZoomPanels()
     end
     
     logger.info(string.format("DynamicPanelZoom: Analyzing page %d for %s panels dynamically", page_idx, reading_dir))
-    if self.experimental_panel_sorting_enabled then
-        self.current_panels = self:analyzePageForPanelsExperimental(page_idx)
-    else
-        self.current_panels = self:analyzePageForPanels(page_idx)
-    end
-    
+    self.current_panels = self:detectPanels(page_idx)
+
     -- Cache it for this document and page and direction
     self._panel_cache[doc_path][reading_dir][page_idx] = self.current_panels
     
@@ -825,6 +823,209 @@ function PanelZoomIntegration:importToggleZoomPanels()
     else
         logger.warn(string.format("DynamicPanelZoom: No panels detected on page %d", page_idx))
     end
+end
+
+-- Pre-computed panels: <comic>.json beside the comic file (same name, .json).
+-- Accepts panelreader.koplugin's format (normalized) and Kumiko's output (pixels).
+-- Returns nil when there is no file or it has nothing for this page.
+function PanelZoomIntegration:getPanelsFromJson(pageno)
+    if not self.use_panel_json then return nil end
+    local doc_path = self.ui.document and self.ui.document.file
+    if not doc_path then return nil end
+
+    local cache = self._panel_json_cache
+    if not cache or cache.path ~= doc_path then
+        cache = { path = doc_path, pages = nil }
+        self._panel_json_cache = cache
+
+        local json_path = (doc_path:gsub("%.[^./\\]+$", "")) .. ".json"
+        local file = io.open(json_path, "r")
+        if file then
+            local content = file:read("*all")
+            file:close()
+            local decoded_ok, data = pcall(json.decode, content)
+            if decoded_ok and data then
+                local pages, err = require("panel_json").parse(data)
+                if pages then
+                    cache.pages = pages
+                    local count = 0
+                    for _ in pairs(pages) do count = count + 1 end
+                    logger.info(string.format("DynamicPanelZoom: Loaded panel data for %d pages from %s", count, json_path))
+                else
+                    logger.warn("DynamicPanelZoom: Ignoring " .. json_path .. ": " .. tostring(err))
+                end
+            else
+                logger.warn("DynamicPanelZoom: Could not parse " .. json_path)
+            end
+        end
+    end
+
+    local panels = cache.pages and cache.pages[pageno]
+    if panels then
+        logger.info(string.format("DynamicPanelZoom: Using %d panels from JSON for page %d", #panels, pageno))
+    end
+    return panels
+end
+
+function PanelZoomIntegration:analyzePageLegacy(pageno)
+    if self.experimental_panel_sorting_enabled then
+        return self:analyzePageForPanelsExperimental(pageno)
+    end
+    return self:analyzePageForPanels(pageno)
+end
+
+-- Gutter-based (XY-cut) detection first; the connected-components detector is
+-- kept as a fallback for layouts without straight gutters (pinwheel, etc).
+function PanelZoomIntegration:detectPanels(pageno)
+    local json_panels = self:getPanelsFromJson(pageno)
+    if json_panels then return json_panels end
+
+    if self.legacy_panel_detection then
+        return self:analyzePageLegacy(pageno)
+    end
+
+    local ok, panels = pcall(self.analyzePageForPanelsXY, self, pageno)
+    if not ok then
+        logger.warn("DynamicPanelZoom: XY-cut detection failed: " .. tostring(panels))
+        panels = {}
+    end
+    if #panels > 1 then return panels end
+
+    -- 0 or 1 panels: the page may be a layout XY-cut cannot split. Let the legacy
+    -- detector have a go and keep whichever found more.
+    local legacy_ok, legacy = pcall(self.analyzePageLegacy, self, pageno)
+    if legacy_ok and #legacy > #panels then
+        logger.info(string.format("DynamicPanelZoom: Legacy detector found %d panels vs %d", #legacy, #panels))
+        return legacy
+    end
+    return panels
+end
+
+function PanelZoomIntegration:analyzePageForPanelsXY(pageno)
+    local ffi = require("ffi")
+    local leptonica = ffi.loadlib("leptonica", "6")
+    local PanelDetector = require("panel_detector")
+
+    if not self.ui.document or not self.ui.document._document then return {} end
+
+    local KOPTContext = require("ffi/koptcontext")
+    local page_size = self.ui.document:getNativePageDimensions(pageno)
+    if not page_size then return {} end
+
+    local bbox = { x0 = 0, y0 = 0, x1 = page_size.w, y1 = page_size.h }
+
+    local kc
+    local koptinterface = self.ui.document.koptinterface
+    if koptinterface and koptinterface.createContext then
+        kc = koptinterface:createContext(self.ui.document, pageno, bbox)
+    else
+        kc = KOPTContext.new()
+        kc:setZoom(1.0)
+        kc:setBBox(bbox.x0, bbox.y0, bbox.x1, bbox.y1)
+    end
+
+    local page = self.ui.document._document:openPage(pageno)
+    if not page then
+        if kc.free then kc:free() end
+        return {}
+    end
+    page:getPagePix(kc, self.ui.document.render_mode)
+
+    local panels = {}
+    if kc.src.data then
+        local k2pdfopt = KOPTContext.k2pdfopt
+
+        local function _gc_ptr(p, destructor)
+            return p and ffi.gc(p, destructor)
+        end
+        local function pixDestroy(pix)
+            leptonica.pixDestroy(ffi.new('PIX *[1]', pix))
+            ffi.gc(pix, nil)
+        end
+
+        local pixs = _gc_ptr(k2pdfopt.bitmap2pix(kc.src, 0, 0, kc.src.width, kc.src.height), pixDestroy)
+        -- Keep color when available: pale yellows/blues are nearly white in gray,
+        -- which made colored pages look like they had no content.
+        local is_color = leptonica.pixGetDepth(pixs) == 32
+        local pixc = pixs
+        if not is_color and leptonica.pixGetDepth(pixs) ~= 8 then
+            pixc = _gc_ptr(leptonica.pixConvertTo8(pixs, 0), pixDestroy)
+        end
+
+        local img_w = leptonica.pixGetWidth(pixc)
+        local img_h = leptonica.pixGetHeight(pixc)
+
+        -- Downsample so the analysis stays cheap on e-ink hardware. Area-averaging
+        -- keeps thin panel borders visible; fall back to 2x2 min-sampling if the
+        -- scaler is not exposed by this KOReader build.
+        local MAX_DIM = 640
+        local scale = math.min(1, MAX_DIM / math.max(img_w, img_h))
+        local small = pixc
+        if scale < 1 then
+            local scaled_ok, scaled = pcall(function()
+                return leptonica.pixScaleAreaMap(pixc, scale, scale)
+            end)
+            if scaled_ok and scaled ~= nil then
+                small = _gc_ptr(scaled, pixDestroy)
+            end
+        end
+
+        local sw = leptonica.pixGetWidth(small)
+        local sh = leptonica.pixGetHeight(small)
+        local val = ffi.new("l_uint32[1]")
+        local bit = require("bit")
+        local function readPixel(pix, x, y)
+            leptonica.pixGetPixel(pix, x, y, val)
+            local v = tonumber(val[0])
+            if is_color then
+                -- leptonica packs RGB as 0xRRGGBBaa
+                return bit.band(bit.rshift(v, 24), 255), bit.band(bit.rshift(v, 16), 255), bit.band(bit.rshift(v, 8), 255)
+            end
+            return v, v, v
+        end
+
+        local npx = sw * sh + 1
+        local pr, pg, pb = ffi.new("uint8_t[?]", npx), ffi.new("uint8_t[?]", npx), ffi.new("uint8_t[?]", npx)
+        if small ~= pixc or scale >= 1 then
+            for y = 0, sh - 1 do
+                local base = y * sw
+                for x = 0, sw - 1 do
+                    local r, g, b = readPixel(small, x, y)
+                    local i = base + x + 1
+                    pr[i], pg[i], pb[i] = r, g, b
+                end
+            end
+        else
+            local fx, fy = img_w / sw, img_h / sh
+            for y = 0, sh - 1 do
+                local base = y * sw
+                for x = 0, sw - 1 do
+                    local mr, mg, mb, ml = 255, 255, 255, 1e9
+                    for dy = 0, 1 do
+                        for dx = 0, 1 do
+                            local px = math.min(img_w - 1, math.floor(x * fx + dx * fx / 2))
+                            local py = math.min(img_h - 1, math.floor(y * fy + dy * fy / 2))
+                            local r, g, b = readPixel(pixc, px, py)
+                            local l = r + g + b
+                            if l < ml then mr, mg, mb, ml = r, g, b, l end
+                        end
+                    end
+                    local i = base + x + 1
+                    pr[i], pg[i], pb[i] = mr, mg, mb
+                end
+            end
+        end
+
+        panels = PanelDetector.detect({ r = pr, g = pg, b = pb }, sw, sh, self:getEffectiveReadingDirection())
+        logger.info(string.format("DynamicPanelZoom: XY-cut detected %d panels on a %dx%d grid", #panels, sw, sh))
+        for i, p in ipairs(panels) do
+            logger.dbg(string.format("  Panel %d: x=%.3f y=%.3f w=%.3f h=%.3f", i, p.x, p.y, p.w, p.h))
+        end
+    end
+
+    page:close()
+    if kc.free then kc:free() end
+    return panels
 end
 
 function PanelZoomIntegration:analyzePageForPanels(pageno)
@@ -935,10 +1136,10 @@ function PanelZoomIntegration:analyzePageForPanels(pageno)
                 local box_x, box_y, box_w, box_h = boxGetGeometry(box)
                 
                 table.insert(panels, {
-                    x = box_x / target_w,
-                    y = box_y / target_h,
-                    w = box_w / target_w,
-                    h = box_h / target_h,
+                    x = box_x / img_w,
+                    y = box_y / img_h,
+                    w = box_w / img_w,
+                    h = box_h / img_h,
                 })
             end
             -- Note: Memory is handled automatically by _gc_ptr!
@@ -1068,10 +1269,10 @@ function PanelZoomIntegration:analyzePageForPanelsExperimental(pageno)
             -- We don't filter during extraction, we just get all boxes
             local box_x, box_y, box_w, box_h = boxGetGeometry(box)
             table.insert(initial_boxes, {
-                x = box_x / target_w,
-                y = box_y / target_h,
-                w = box_w / target_w,
-                h = box_h / target_h,
+                x = box_x / img_w,
+                y = box_y / img_h,
+                w = box_w / img_w,
+                h = box_h / img_h,
             })
         end
     end
@@ -1710,6 +1911,27 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
             table.insert(menu_items, 5, {
                 text = _("Experimental features"),
                 sub_item_table = {
+                    {
+                        text = _("Use panel JSON file when available"),
+                        checked_func = function() return self.use_panel_json end,
+                        callback = function()
+                            self.use_panel_json = not self.use_panel_json
+                            logger.info("DynamicPanelZoom: Use panel JSON set to " .. tostring(self.use_panel_json))
+                            self._panel_json_cache = nil
+                            self:invalidatePanelCache()
+                            self:savePluginSettings()
+                        end,
+                    },
+                    {
+                        text = _("Legacy panel detection (connected components)"),
+                        checked_func = function() return self.legacy_panel_detection end,
+                        callback = function()
+                            self.legacy_panel_detection = not self.legacy_panel_detection
+                            logger.info("DynamicPanelZoom: Legacy panel detection set to " .. tostring(self.legacy_panel_detection))
+                            self:invalidatePanelCache()
+                            self:savePluginSettings()
+                        end,
+                    },
                     {
                         text = _("Experimental Panel Sorting (Z-pattern)"),
                         checked_func = function() return self.experimental_panel_sorting_enabled end,
