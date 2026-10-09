@@ -9,7 +9,7 @@ No pre-processing, external scripts, or JSON files required—it analyzes the pa
 </p>
 
 ## Features
-- **🤖 Real-time Detection:** Analyzes pages instantly using KOReader's native engine.
+- **🤖 Real-time Detection:** Analyzes pages instantly using gutter-based (XY-cut) detection, with a connected-components fallback. Handles touching panels, tinted/noisy paper and dark gutters, and orders panels correctly for tall-next-to-stacked layouts.
 - **📖 Focused View:** Centers each panel and masks adjacent content to reduce distractions.
 - **⚡ Smart Pre-loading:** Renders the next panel in the background for zero-lag transitions.
 - **🔄 Reading Direction:** Supports Left-to-Right (Western) and Right-to-Left (Manga).
