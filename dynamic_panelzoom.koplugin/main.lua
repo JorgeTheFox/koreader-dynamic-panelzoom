@@ -43,6 +43,7 @@ local PanelZoomIntegration = WidgetContainer:extend{
     _original_ocr_menu_enabled = nil, -- Store original OCR menu state
     _original_genPanelZoomMenu = nil, -- Store original panel zoom menu function
     _json_available = false, -- Track if JSON is available for current document
+    saved_preset = nil, -- Snapshot of user-configured settings (table with USER_SETTINGS keys)
 }
 
 function PanelZoomIntegration:savePluginSettings()
@@ -54,6 +55,7 @@ function PanelZoomIntegration:savePluginSettings()
         for key, _ in pairs(USER_SETTINGS) do
             settings_to_save[key] = self[key]
         end
+        settings_to_save["saved_preset"] = self.saved_preset
         
         file:write(json.encode(settings_to_save))
         file:close()
@@ -82,6 +84,8 @@ function PanelZoomIntegration:loadSavedSettings()
             self[key] = default_value
         end
     end
+
+    self.saved_preset = saved_settings["saved_preset"]
 end
 
 function PanelZoomIntegration:resetSettingsToDefault()
@@ -110,6 +114,76 @@ function PanelZoomIntegration:resetSettingsToDefault()
         end,
     }
     UIManager:show(reset_dialog)
+end
+
+-- Save the current configuration as a user preset (snapshot of USER_SETTINGS values)
+function PanelZoomIntegration:saveSettingsPreset()
+    local save_dialog
+    save_dialog = ConfirmBox:new{
+        text = _("Salvar a configuração atual como predefinição?"),
+        ok_text = _("Salvar"),
+        cancel_text = _("Cancelar"),
+        ok_callback = function()
+            local preset = {}
+            for key, _ in pairs(USER_SETTINGS) do
+                preset[key] = self[key]
+            end
+            self.saved_preset = preset
+            self:savePluginSettings()
+
+            UIManager:close(save_dialog)
+
+            local InfoMessage = require("ui/widget/infomessage")
+            UIManager:show(InfoMessage:new{
+                text = _("Predefinição salva com sucesso!"),
+                timeout = 2,
+            })
+        end,
+        cancel_callback = function()
+            UIManager:close(save_dialog)
+        end,
+    }
+    UIManager:show(save_dialog)
+end
+
+-- Restore the previously saved preset (reset back to the user's saved configuration)
+function PanelZoomIntegration:restoreSettingsPreset()
+    if not self.saved_preset then
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{
+            text = _("Nenhuma predefinição salva ainda. Use \"Salvar predefinição atual\" primeiro."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local restore_dialog
+    restore_dialog = ConfirmBox:new{
+        text = _("Restaurar a configuração salva na predefinição? As configurações atuais serão substituídas."),
+        ok_text = _("Restaurar"),
+        cancel_text = _("Cancelar"),
+        ok_callback = function()
+            for key, value in pairs(self.saved_preset) do
+                if USER_SETTINGS[key] ~= nil then
+                    self[key] = value
+                end
+            end
+            self:savePluginSettings()
+            self:invalidatePanelCache()
+
+            UIManager:close(restore_dialog)
+
+            local InfoMessage = require("ui/widget/infomessage")
+            UIManager:show(InfoMessage:new{
+                text = _("Predefinição restaurada!"),
+                timeout = 2,
+            })
+        end,
+        cancel_callback = function()
+            UIManager:close(restore_dialog)
+        end,
+    }
+    UIManager:show(restore_dialog)
 end
 
 function PanelZoomIntegration:invalidatePanelCache()
@@ -1729,6 +1803,24 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
                 text = _("Reset PanelZoom settings to default"),
                 callback = function()
                     self:resetSettingsToDefault()
+                end,
+                separator = true,
+            })
+
+            -- Add Save preset option
+            table.insert(menu_items, 7, {
+                text = _("Salvar predefinição atual"),
+                callback = function()
+                    self:saveSettingsPreset()
+                end,
+                separator = true,
+            })
+
+            -- Add Restore preset option
+            table.insert(menu_items, 8, {
+                text = _("Restaurar predefinição salva"),
+                callback = function()
+                    self:restoreSettingsPreset()
                 end,
                 separator = true,
             })
