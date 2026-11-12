@@ -120,9 +120,9 @@ end
 function PanelZoomIntegration:saveSettingsPreset()
     local save_dialog
     save_dialog = ConfirmBox:new{
-        text = _("Salvar a configuração atual como predefinição?"),
-        ok_text = _("Salvar"),
-        cancel_text = _("Cancelar"),
+        text = _("Save the current configuration as a preset?"),
+        ok_text = _("Save"),
+        cancel_text = _("Cancel"),
         ok_callback = function()
             local preset = {}
             for key, _ in pairs(USER_SETTINGS) do
@@ -135,7 +135,7 @@ function PanelZoomIntegration:saveSettingsPreset()
 
             local InfoMessage = require("ui/widget/infomessage")
             UIManager:show(InfoMessage:new{
-                text = _("Predefinição salva com sucesso!"),
+                text = _("Preset saved successfully!"),
                 timeout = 2,
             })
         end,
@@ -151,7 +151,7 @@ function PanelZoomIntegration:restoreSettingsPreset()
     if not self.saved_preset then
         local InfoMessage = require("ui/widget/infomessage")
         UIManager:show(InfoMessage:new{
-            text = _("Nenhuma predefinição salva ainda. Use \"Salvar predefinição atual\" primeiro."),
+            text = _("No preset saved yet. Use \"Save current settings as preset\" first."),
             timeout = 3,
         })
         return
@@ -159,9 +159,9 @@ function PanelZoomIntegration:restoreSettingsPreset()
 
     local restore_dialog
     restore_dialog = ConfirmBox:new{
-        text = _("Restaurar a configuração salva na predefinição? As configurações atuais serão substituídas."),
-        ok_text = _("Restaurar"),
-        cancel_text = _("Cancelar"),
+        text = _("Restore the saved preset? Current settings will be replaced."),
+        ok_text = _("Restore"),
+        cancel_text = _("Cancel"),
         ok_callback = function()
             for key, value in pairs(self.saved_preset) do
                 if USER_SETTINGS[key] ~= nil then
@@ -175,7 +175,7 @@ function PanelZoomIntegration:restoreSettingsPreset()
 
             local InfoMessage = require("ui/widget/infomessage")
             UIManager:show(InfoMessage:new{
-                text = _("Predefinição restaurada!"),
+                text = _("Preset restored!"),
                 timeout = 2,
             })
         end,
@@ -1809,7 +1809,7 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
 
             -- Add Save preset option
             table.insert(menu_items, 7, {
-                text = _("Salvar predefinição atual"),
+                text = _("Save current settings as preset"),
                 callback = function()
                     self:saveSettingsPreset()
                 end,
@@ -1818,7 +1818,7 @@ function PanelZoomIntegration:setupPanelZoomMenuIntegration()
 
             -- Add Restore preset option
             table.insert(menu_items, 8, {
-                text = _("Restaurar predefinição salva"),
+                text = _("Restore saved preset"),
                 callback = function()
                     self:restoreSettingsPreset()
                 end,
